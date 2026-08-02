@@ -262,6 +262,59 @@ afterEach(() => {
 });
 
 describe('Transport launch/config plumbing', () => {
+  it('continues waiting across QR refreshes when both authentication timeouts are disabled', async () => {
+    const logger = createLogger();
+    const page = new TestPage();
+    const transport = new Transport({
+      driver: new CaptureDriver(new TestBrowser(page)),
+      events: createEvents(),
+      logger,
+      qrTimeoutMs: 0,
+      authTimeoutMs: 0,
+      qrPollingMs: 0,
+      blockCrashLogs: false,
+    });
+
+    await transport.initialize();
+    vi.spyOn(transport, 'isAuthenticated').mockResolvedValue(undefined);
+    vi.spyOn(transport, 'waitForQr')
+      .mockResolvedValueOnce('first-qr')
+      .mockResolvedValueOnce('second-qr');
+    vi.spyOn(transport, 'waitForSessionLoaded')
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    const result = await transport.waitForAuthentication();
+
+    expect(result.outcome).toBe('authenticated');
+    expect(transport.waitForQr).toHaveBeenCalledTimes(2);
+    expect(logger.info).toHaveBeenCalledWith('qr_wait_restarted', {
+      reason: 'qr_expired_or_page_context_changed',
+    });
+  });
+
+  it('keeps finite QR timeout behavior unchanged', async () => {
+    const page = new TestPage();
+    const transport = new Transport({
+      driver: new CaptureDriver(new TestBrowser(page)),
+      events: createEvents(),
+      logger: createLogger(),
+      qrTimeoutMs: 1,
+      authTimeoutMs: 1,
+      blockCrashLogs: false,
+    });
+
+    await transport.initialize();
+    vi.spyOn(transport, 'isAuthenticated').mockResolvedValue(undefined);
+    vi.spyOn(transport, 'waitForQr').mockResolvedValue('qr');
+    vi.spyOn(transport, 'waitForSessionLoaded').mockResolvedValue(false);
+
+    const result = await transport.waitForAuthentication();
+
+    expect(result.outcome).toBe('qr_timeout');
+    expect(transport.waitForQr).toHaveBeenCalledTimes(1);
+  });
+
   it('forwards userDataDir to driver launch options', async () => {
     const page = new TestPage();
     const driver = new CaptureDriver(new TestBrowser(page));

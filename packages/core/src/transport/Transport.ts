@@ -1951,41 +1951,60 @@ export class Transport {
       }
     }
 
-    const qrData = await this.waitForQr();
-    if (!qrData) {
-      return this.resolveAuthTimeoutOutcome({
-        correlationId: 'auth-settle',
-        qrSeen: false,
-        authMethod: 'qr',
-      });
-    }
+    const waitForever = this.qrTimeoutMs === 0 && this.authTimeoutMs === 0;
 
-    const qrScanTimeoutMs = this.qrTimeoutMs === 0 ? 0 : this.qrTimeoutMs * 2;
-    const sessionLoaded = await this.waitForSessionLoaded(qrScanTimeoutMs || this.authTimeoutMs);
-    if (sessionLoaded) {
+    while (true) {
+      const qrData = await this.waitForQr();
+      if (!qrData) {
+        if (waitForever) {
+          this.logger.info('qr_wait_restarted', {
+            reason: 'qr_unavailable_or_page_context_changed',
+          });
+          await new Promise((resolve) => setTimeout(resolve, this.qrPollingMs));
+          continue;
+        }
+
+        return this.resolveAuthTimeoutOutcome({
+          correlationId: 'auth-settle',
+          qrSeen: false,
+          authMethod: 'qr',
+        });
+      }
+
+      const qrScanTimeoutMs = this.qrTimeoutMs === 0 ? 0 : this.qrTimeoutMs * 2;
+      const sessionLoaded = await this.waitForSessionLoaded(qrScanTimeoutMs || this.authTimeoutMs);
+      if (sessionLoaded) {
+        return {
+          outcome: 'authenticated',
+          qrSeen: true,
+          qrAttempts: this.qrAttempt,
+          authMethod: 'qr',
+        };
+      }
+
+      if (this.qrMax && this.qrAttempt >= this.qrMax) {
+        return {
+          outcome: 'qr_max',
+          qrSeen: true,
+          qrAttempts: this.qrAttempt,
+          authMethod: 'qr',
+        };
+      }
+
+      if (waitForever) {
+        this.logger.info('qr_wait_restarted', {
+          reason: 'qr_expired_or_page_context_changed',
+        });
+        continue;
+      }
+
       return {
-        outcome: 'authenticated',
+        outcome: 'qr_timeout',
         qrSeen: true,
         qrAttempts: this.qrAttempt,
         authMethod: 'qr',
       };
     }
-
-    if (this.qrMax && this.qrAttempt >= this.qrMax) {
-      return {
-        outcome: 'qr_max',
-        qrSeen: true,
-        qrAttempts: this.qrAttempt,
-        authMethod: 'qr',
-      };
-    }
-
-    return {
-      outcome: 'qr_timeout',
-      qrSeen: true,
-      qrAttempts: this.qrAttempt,
-      authMethod: 'qr',
-    };
   }
 
   private async resolveAuthTimeoutOutcome(options: {
