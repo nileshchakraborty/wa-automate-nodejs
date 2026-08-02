@@ -1,6 +1,8 @@
 import type { HttpMethodDefinition } from '@open-wa/schema';
 
-function schemaToOpenApi(schema: { toJSONSchema?: (params?: unknown) => unknown }) {
+function schemaToOpenApi(schema: {
+  toJSONSchema?: (params?: unknown) => unknown;
+}) {
   if (typeof schema?.toJSONSchema === 'function') {
     return schema.toJSONSchema({ target: 'openapi-3.0' });
   }
@@ -25,9 +27,65 @@ function buildQueryParameters(def: HttpMethodDefinition) {
   }));
 }
 
+function buildScalarClientExamples(origin: string) {
+  const healthUrl = `${origin}/health`;
+  return [
+    {
+      lang: 'shell',
+      source: `curl --fail \\
+  --header "X-API-Key: $OPENWA_API_KEY" \\
+  "${healthUrl}"`,
+    },
+    {
+      lang: 'ruby',
+      source: `require "net/http"
+
+uri = URI("${healthUrl}")
+request = Net::HTTP::Get.new(uri)
+request["X-API-Key"] = ENV.fetch("OPENWA_API_KEY")
+response = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(request) }
+puts response.body`,
+    },
+    {
+      lang: 'node',
+      source: `const response = await fetch("${healthUrl}", {
+  headers: { "X-API-Key": process.env.OPENWA_API_KEY },
+});
+
+console.log(await response.json());`,
+    },
+    {
+      lang: 'php',
+      source: `<?php
+$context = stream_context_create([
+  "http" => ["header" => "X-API-Key: " . getenv("OPENWA_API_KEY")],
+]);
+
+echo file_get_contents("${healthUrl}", false, $context);`,
+    },
+    {
+      lang: 'python',
+      source: `import json
+import os
+import urllib.request
+
+request = urllib.request.Request("${healthUrl}")
+request.add_header("X-API-Key", os.environ["OPENWA_API_KEY"])
+
+with urllib.request.urlopen(request) as response:
+    print(json.load(response))`,
+    },
+  ];
+}
+
 export function createOpenApiDocument(
   methodDefinitions: HttpMethodDefinition[],
-  options: { origin: string; basePath?: string; title?: string; version?: string }
+  options: {
+    origin: string;
+    basePath?: string;
+    title?: string;
+    version?: string;
+  },
 ) {
   const paths = Object.fromEntries(
     methodDefinitions.map((def) => [
@@ -49,7 +107,9 @@ export function createOpenApiDocument(
                   },
                 },
               }),
-          'x-openwa-aliases': def.routeSignatures.filter((signature) => signature !== `${def.httpMethod} ${def.path}`),
+          'x-openwa-aliases': def.routeSignatures.filter(
+            (signature) => signature !== `${def.httpMethod} ${def.path}`,
+          ),
           responses: {
             '200': {
               description: 'Successful response',
@@ -62,7 +122,7 @@ export function createOpenApiDocument(
           },
         },
       },
-    ])
+    ]),
   );
 
   return {
@@ -70,6 +130,7 @@ export function createOpenApiDocument(
     info: {
       title: options.title || 'open-wa Easy API',
       version: options.version || '5.0.0',
+      'x-scalar-sdk-installation': buildScalarClientExamples(options.origin),
     },
     servers: [{ url: options.origin }],
     paths,
