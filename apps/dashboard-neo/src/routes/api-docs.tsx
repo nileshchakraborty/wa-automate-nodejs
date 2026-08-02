@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
-import { useSocket } from "@/lib/hooks/use-socket"
-import { getApiUrl } from "@/lib/api-client"
 import { ApiReferenceReact } from "@scalar/api-reference-react"
+import { useSocket } from "@/lib/hooks/use-socket"
+import { apiFetch, getApiUrl } from "@/lib/api-client"
 import "@scalar/api-reference-react/style.css"
 import "@/styles.css"
 
@@ -36,7 +36,9 @@ function ApiDocsPage() {
       <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="size-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Loading API documentation...</p>
+          <p className="text-sm text-muted-foreground">
+            Loading API documentation...
+          </p>
         </div>
       </div>
     )
@@ -45,25 +47,28 @@ function ApiDocsPage() {
   return (
     <div className="scalar-container">
       <ApiReferenceReact
-        configuration={{
-          url: `${apiUrl}/meta/swagger.json`,
-          theme: "none",
-          layout: "classic",
-          hideModels: false,
-          hideClientButton: false,
-          hideDarkModeToggle: true,
-          withDefaultFonts: false,
-          darkMode: document.documentElement.classList.contains("dark"),
-          // Disable AI agent features
-          agent: {
-            disabled: true,
-          },
-          // Disable MCP integration
-          mcp: {
-            disabled: true,
-          },
-          // Apply our own CSS on top of Scalar's base
-          customCss: `
+        configuration={
+          {
+            url: `${apiUrl}/meta/swagger.json`,
+            fetch: apiFetch,
+            theme: "none",
+            layout: "classic",
+            hideModels: false,
+            hideClientButton: false,
+            hideDarkModeToggle: true,
+            withDefaultFonts: false,
+            darkMode: document.documentElement.classList.contains("dark"),
+            telemetry: false,
+            // Disable AI agent features
+            agent: {
+              disabled: true,
+            },
+            // Disable MCP integration
+            mcp: {
+              disabled: true,
+            },
+            // Apply our own CSS on top of Scalar's base
+            customCss: `
             /* Hide Scalar branding / powered-by links */
             .scalar-card-footer-powered-by,
             a[href*="scalar.com"],
@@ -79,7 +84,8 @@ function ApiDocsPage() {
               font-family: var(--font-sans) !important;
             }
           `,
-        } as any}
+          } as any
+        }
       />
     </div>
   )
