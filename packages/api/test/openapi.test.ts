@@ -9,16 +9,33 @@ describe('createOpenApiDocument', () => {
     const examples = document.info['x-scalar-sdk-installation'];
 
     expect(examples.map(({ lang }) => lang)).toEqual([
+      'c',
+      'clojure',
+      'csharp',
+      'dart',
+      'fsharp',
+      'go',
+      'http',
+      'java',
+      'js',
+      'kotlin',
       'shell',
       'ruby',
       'node',
+      'objc',
+      'ocaml',
       'php',
+      'powershell',
       'python',
+      'r',
+      'rust',
+      'swift',
     ]);
+    expect(examples.every(({ source }) => source.includes('/health'))).toBe(
+      true,
+    );
     expect(
-      examples.every(({ source }) =>
-        source.includes('http://rpi.local:8081/health'),
-      ),
+      examples.every(({ source }) => source.includes('rpi.local:8081')),
     ).toBe(true);
     expect(
       examples.every(({ source }) => source.includes('OPENWA_API_KEY')),

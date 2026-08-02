@@ -8,6 +8,30 @@ import "@/styles.css"
 
 export const Route = createFileRoute("/api-docs")({ component: ApiDocsPage })
 
+const SCALAR_HTTP_CLIENTS = [
+  "c/libcurl",
+  "clojure/clj_http",
+  "csharp/httpclient",
+  "dart/http",
+  "fsharp/httpclient",
+  "go/native",
+  "http/http1.1",
+  "java/nethttp",
+  "js/fetch",
+  "kotlin/okhttp",
+  "node/undici",
+  "objc/nsurlsession",
+  "ocaml/cohttp",
+  "php/guzzle",
+  "powershell/restmethod",
+  "python/python3",
+  "r/httr",
+  "ruby/native",
+  "rust/reqwest",
+  "shell/curl",
+  "swift/nsurlsession",
+] as const
+
 /**
  * API Documentation page using Scalar API Reference.
  *
@@ -59,6 +83,9 @@ function ApiDocsPage() {
             withDefaultFonts: false,
             darkMode: document.documentElement.classList.contains("dark"),
             telemetry: false,
+            // Installation examples are keyed by language, so expose one
+            // representative client per language to keep every label accurate.
+            httpClients: SCALAR_HTTP_CLIENTS,
             // Disable AI agent features
             agent: {
               disabled: true,
