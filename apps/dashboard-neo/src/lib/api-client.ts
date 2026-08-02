@@ -12,35 +12,38 @@
  * 4. meta tag (owa-api-url)
  * 5. Current window origin (same host:port)
  */
-export { SocketClient } from "@open-wa/socket-client"
-export type { Client, ClientMethods } from "@open-wa/socket-client"
-
 import { SocketClient } from "@open-wa/socket-client"
+import { getStoredConnection } from "./connection-profiles"
+import type { Client, ClientMethods } from "@open-wa/socket-client"
 
-const STORAGE_KEY = "wa-dashboard-connection"
+export { SocketClient }
+export type { Client, ClientMethods }
+
 const API_KEY_STORAGE_KEY = "wa-dashboard-api-key"
 
 // We lazy-connect so SSR doesn't try to open a socket.
-let _client: (SocketClient & import("@open-wa/socket-client").Client) | null = null
-let _connecting: Promise<SocketClient & import("@open-wa/socket-client").Client> | null = null
+let _client: (SocketClient & Client) | null = null
+let _connecting: Promise<SocketClient & Client> | null = null
 
 /**
  * Get or create the singleton SocketClient instance.
  * Safe to call multiple times — will return the same connection.
  */
 export async function getClient(url?: string) {
-  if (_client?.socket?.connected) return _client
+  if (_client?.socket.connected) return _client
 
   if (!_connecting) {
     const target = url || getApiUrl()
-    _connecting = SocketClient.connect(target, getApiKey()).then((c) => {
-      _client = c
-      _connecting = null
-      return c
-    }).catch((err) => {
-      _connecting = null
-      throw err
-    })
+    _connecting = SocketClient.connect(target, getApiKey())
+      .then((c) => {
+        _client = c
+        _connecting = null
+        return c
+      })
+      .catch((err) => {
+        _connecting = null
+        throw err
+      })
   }
 
   return _connecting
@@ -79,8 +82,12 @@ export function getClientSync() {
  * Reset the cached client. Call this before reconnecting with new settings.
  */
 export function resetClient() {
-  if (_client?.socket) {
-    try { _client.socket.disconnect() } catch { /* ignore */ }
+  if (_client) {
+    try {
+      _client.socket.disconnect()
+    } catch {
+      /* ignore */
+    }
   }
   _client = null
   _connecting = null
@@ -98,33 +105,33 @@ export function resetClient() {
  */
 export function getApiUrl(): string {
   if (typeof window === "undefined") return "http://localhost:8002"
-  
+
   // 1. Check for Vite environment variables (development overrides)
-  if (import.meta.env?.VITE_EASY_API_PORT || import.meta.env?.VITE_EASY_API_HOST) {
-    const rawHost = import.meta.env.VITE_EASY_API_HOST || window.location.hostname
-    const hasProtocol = rawHost.startsWith('http://') || rawHost.startsWith('https://')
-    const protocol = hasProtocol ? '' : `${window.location.protocol}//`
+  if (
+    import.meta.env.VITE_EASY_API_PORT ||
+    import.meta.env.VITE_EASY_API_HOST
+  ) {
+    const rawHost =
+      import.meta.env.VITE_EASY_API_HOST || window.location.hostname
+    const hasProtocol =
+      rawHost.startsWith("http://") || rawHost.startsWith("https://")
+    const protocol = hasProtocol ? "" : `${window.location.protocol}//`
     const cleanHost = rawHost.replace(/\/$/, "") // remove trailing slash
-    
+
     // Explicit port override via env takes precedence, fallback to existing parsed port if missing
-    const portParams = import.meta.env.VITE_EASY_API_PORT ? `:${import.meta.env.VITE_EASY_API_PORT}` : ''
-    
+    const portParams = import.meta.env.VITE_EASY_API_PORT
+      ? `:${import.meta.env.VITE_EASY_API_PORT}`
+      : ""
+
     return `${protocol}${cleanHost}${portParams}`
   }
 
-  // 2. Check localStorage for user-configured connection
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const { host, port } = JSON.parse(raw) as { host?: string; port?: string }
-      if (host || port) {
-        const h = host || window.location.hostname
-        const p = port ? `:${port}` : ""
-        return `${window.location.protocol}//${h}${p}`
-      }
-    }
-  } catch {
-    // ignore
+  // 2. Check the active user-configured connection profile
+  const stored = getStoredConnection()
+  if (stored && (stored.host || stored.port)) {
+    const host = stored.host || window.location.hostname
+    const port = stored.port ? `:${stored.port}` : ""
+    return `${window.location.protocol}//${host}${port}`
   }
 
   // 3. Check for URL Search Params (e.g. ?port=8081)
@@ -132,13 +139,15 @@ export function getApiUrl(): string {
   const portParam = urlParams.get("port")
 
   // 4. The API URL can be injected via a meta tag or env var
-  const meta = document.querySelector<HTMLMetaElement>('meta[name="owa-api-url"]')
+  const meta = document.querySelector<HTMLMetaElement>(
+    'meta[name="owa-api-url"]'
+  )
   if (meta?.content) return meta.content
-  
+
   // 5. Fallback to host port
   const port = portParam || window.location.port
   const host = window.location.hostname
   const protocol = window.location.protocol
-  
+
   return port ? `${protocol}//${host}:${port}` : `${protocol}//${host}`
 }
