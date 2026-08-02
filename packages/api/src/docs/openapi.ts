@@ -276,6 +276,7 @@ export function createOpenApiDocument(
     basePath?: string;
     title?: string;
     version?: string;
+    apiKeyRequired?: boolean;
   },
 ) {
   const paths = Object.fromEntries(
@@ -324,6 +325,20 @@ export function createOpenApiDocument(
       'x-scalar-sdk-installation': buildScalarClientExamples(options.origin),
     },
     servers: [{ url: options.origin }],
+    ...(options.apiKeyRequired
+      ? {
+          components: {
+            securitySchemes: {
+              ApiKeyAuth: {
+                type: 'apiKey',
+                in: 'header',
+                name: 'X-API-Key',
+              },
+            },
+          },
+          security: [{ ApiKeyAuth: [] }],
+        }
+      : {}),
     paths,
   };
 }

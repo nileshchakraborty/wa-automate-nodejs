@@ -42,4 +42,27 @@ describe('createOpenApiDocument', () => {
     ).toBe(true);
     expect(JSON.stringify(examples)).not.toContain('X-API-Key: e5ac');
   });
+
+  it('declares header authentication only when an API key is configured', () => {
+    const protectedDocument = createOpenApiDocument([], {
+      origin: 'http://rpi.local:8081',
+      apiKeyRequired: true,
+    });
+    const loopbackDocument = createOpenApiDocument([], {
+      origin: 'http://127.0.0.1:8081',
+    });
+
+    expect(protectedDocument.components).toEqual({
+      securitySchemes: {
+        ApiKeyAuth: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'X-API-Key',
+        },
+      },
+    });
+    expect(protectedDocument.security).toEqual([{ ApiKeyAuth: [] }]);
+    expect(loopbackDocument).not.toHaveProperty('components');
+    expect(loopbackDocument).not.toHaveProperty('security');
+  });
 });
