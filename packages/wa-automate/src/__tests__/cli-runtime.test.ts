@@ -196,6 +196,15 @@ describe('cli runtime chrome resolution', () => {
     expect(parsed.forwardedArgs).toEqual(['--session-id', 'alpha', '--port', '9000', '--headful', '--use-chrome', '--use-lightpanda']);
   });
 
+  it('does not turn CLI defaults into overrides when flags are absent', async () => {
+    const { parseCliArgs } = await importCliRuntimeUtilityModule();
+
+    const parsed = parseCliArgs(['--config', '/config/wa.config.json']);
+
+    expect(parsed.cliOverrides).toEqual({});
+    expect(parsed.procName).toBe('@OPEN-WA EASY API');
+  });
+
   it('routes startup, QR, and readiness notices through the sink abstraction', async () => {
     const fakeEmitter = new FakeEmitter();
     const sink = {
@@ -269,6 +278,12 @@ describe('cli runtime chrome resolution', () => {
     });
 
     expect(result.config.sessionId).toBe('sink-session');
+    expect(resolveConfigMock).toHaveBeenCalledWith({
+      configPath: undefined,
+      cliOverrides: { sessionId: 'sink-session' },
+      includeRawConfigs: true,
+      verbose: false,
+    });
     expect(sink.status).toHaveBeenCalledWith({ phase: 'boot' });
     expect(sink.status).toHaveBeenCalledWith({ phase: 'config.resolved', sessionId: 'sink-session' });
     expect(sink.status).toHaveBeenCalledWith({ phase: 'server.starting', sessionId: 'sink-session' });
