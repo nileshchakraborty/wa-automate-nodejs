@@ -389,7 +389,13 @@ export function registerMetaRoutes(
   app.get('/meta/swagger.json', (c: any) => {
     const origin = new URL(c.req.url).origin;
     const basePath = joinPath(getExternalBase(c), 'api');
-    return c.json(createOpenApiDocument(options.methodDefinitions, { origin, basePath }));
+    return c.json(
+      createOpenApiDocument(options.methodDefinitions, {
+        origin,
+        basePath,
+        apiKeyRequired: Boolean(options.config.apiKey),
+      }),
+    );
   });
 
   app.get('/meta/postman.json', (c: any) => {
