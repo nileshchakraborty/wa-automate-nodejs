@@ -246,8 +246,8 @@ function PreLaunchView({
           role="alert"
           className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
         >
-          Open <strong>Connect</strong> in the header, enter the OpenWA API key,
-          and choose <strong>Save &amp; Reconnect</strong>.
+          Open <strong>Connect</strong> in the header to sign in, register a
+          private WhatsApp session, or use an existing API key.
         </div>
       )}
 

@@ -14,16 +14,16 @@
  */
 import { SocketClient } from "@open-wa/socket-client"
 import { getStoredConnection } from "./connection-profiles"
+import { getGatewayAuthStatus } from "./auth-client"
 import type { Client, ClientMethods } from "@open-wa/socket-client"
 
 export { SocketClient }
 export type { Client, ClientMethods }
 
-const API_KEY_STORAGE_KEY = "wa-dashboard-api-key"
-
 // We lazy-connect so SSR doesn't try to open a socket.
 let _client: (SocketClient & Client) | null = null
 let _connecting: Promise<SocketClient & Client> | null = null
+let _apiKey = ""
 
 /**
  * Get or create the singleton SocketClient instance.
@@ -34,7 +34,15 @@ export async function getClient(url?: string) {
 
   if (!_connecting) {
     const target = url || getApiUrl()
-    _connecting = SocketClient.connect(target, getApiKey())
+    _connecting = (async () => {
+      if (typeof window !== "undefined") {
+        const authStatus = await getGatewayAuthStatus()
+        if (authStatus && !authStatus.authenticated) {
+          throw new Error("Authentication required")
+        }
+      }
+      return await SocketClient.connect(target, getApiKey())
+    })()
       .then((c) => {
         _client = c
         _connecting = null
@@ -50,17 +58,11 @@ export async function getClient(url?: string) {
 }
 
 export function getApiKey(): string {
-  if (typeof window === "undefined") return ""
-  return sessionStorage.getItem(API_KEY_STORAGE_KEY) || ""
+  return _apiKey
 }
 
 export function setApiKey(apiKey: string): void {
-  if (typeof window === "undefined") return
-  if (apiKey) {
-    sessionStorage.setItem(API_KEY_STORAGE_KEY, apiKey)
-  } else {
-    sessionStorage.removeItem(API_KEY_STORAGE_KEY)
-  }
+  _apiKey = apiKey
 }
 
 export function apiFetch(input: RequestInfo | URL, init: RequestInit = {}) {
