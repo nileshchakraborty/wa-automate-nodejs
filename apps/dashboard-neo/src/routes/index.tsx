@@ -6,6 +6,7 @@ import { useHealth } from "@/lib/hooks/use-health"
 import { getClient } from "@/lib/api-client"
 import { useDemo } from "@/lib/demo/use-demo"
 import { usePrivacy } from "@/lib/hooks/use-privacy"
+import { getLaunchPhase } from "@/lib/launch-phase"
 import {
   demoMessageVolume,
   demoMessageTypes,
@@ -67,22 +68,7 @@ function getEventIcon(name: string): { color: string; letter: string } {
   return { color: "hsl(0, 0%, 60%)", letter: "·" }
 }
 
-// ─── Determine launch phase from health data ────────────────────
-type LaunchPhase = "connecting" | "launching" | "qr" | "ready"
-
-function getLaunchPhase(
-  healthConnected: boolean,
-  healthSession: Record<string, unknown> | null
-): LaunchPhase {
-  if (!healthConnected || !healthSession) return "connecting"
-
-  if (healthSession.ready) return "ready"
-
-  const state = healthSession.state as string | undefined
-  if (state === "READY" || state === "CONNECTED") return "ready"
-  if (state === "AUTHENTICATING" || state === "WAITING_FOR_SCAN") return "qr"
-  return "launching"
-}
+type LaunchPhase = ReturnType<typeof getLaunchPhase>
 
 function LocalQrCode({ value }: { value: string }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null)
@@ -116,10 +102,12 @@ function PreLaunchView({
   phase,
   qr,
   isDemo,
+  connectionError,
 }: {
   phase: LaunchPhase
   qr: string | null
   isDemo: boolean
+  connectionError?: string | null
 }) {
   const [demoLogLines, setDemoLogLines] = useState<LogLine[]>([])
   const [demoPhase, setDemoPhase] = useState<LaunchPhase | "post-scan">(
@@ -211,6 +199,7 @@ function PreLaunchView({
   const logLines = isDemo ? demoLogLines : liveLogLines
 
   const effectivePhase = isDemo ? demoPhase : phase
+  const connectionFailed = Boolean(connectionError) && !isDemo
   const showQr =
     (effectivePhase === "qr" || phase === "qr") && !isDemo
       ? !!qr
@@ -240,7 +229,9 @@ function PreLaunchView({
           )}
         </div>
         <p className="text-sm text-muted-foreground">
-          {effectivePhase === "connecting"
+          {connectionFailed
+            ? "API authentication or connection failed"
+            : effectivePhase === "connecting"
             ? "Connecting to API server…"
             : isWaitingForQr
               ? "Scan the QR code on your phone to connect"
@@ -250,13 +241,27 @@ function PreLaunchView({
         </p>
       </div>
 
+      {connectionFailed && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
+        >
+          Open <strong>Connect</strong> in the header, enter the OpenWA API key,
+          and choose <strong>Save &amp; Reconnect</strong>.
+        </div>
+      )}
+
       {/* Progress bar */}
       {effectivePhase !== "ready" && (
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <Loader2 size={12} className="animate-spin" />
-              {effectivePhase === "connecting"
+              {!connectionFailed && (
+                <Loader2 size={12} className="animate-spin" />
+              )}
+              {connectionFailed
+                ? "Connection required"
+                : effectivePhase === "connecting"
                 ? "Connecting…"
                 : isWaitingForQr
                   ? "Waiting for QR scan"
@@ -484,19 +489,18 @@ function StatusStep({
 // ─── Main Page ───────────────────────────────────────────────────
 function SessionPage() {
   const { session, qr, loading } = useSession()
-  const { connected } = useSocket()
+  const { connected, error: socketError } = useSocket()
   const { isDemo } = useDemo()
   const { redact } = usePrivacy()
   const { events } = useEvents()
   const h = useHealth()
   const {
-    connected: healthConnected,
     session: healthSession,
     qr: healthQr,
     canInvokeRuntime,
   } = h
   // Compute launch phase
-  const phase = getLaunchPhase(healthConnected, healthSession)
+  const phase = getLaunchPhase(connected, healthSession)
 
   // In demo mode, allow the pre-launch experience to play, then transition
   const [demoReady, setDemoReady] = useState(false)
@@ -640,7 +644,14 @@ function SessionPage() {
   // Show pre-launch experience when session isn't ready
   const sessionReady = isDemo ? demoReady : canInvokeRuntime
   if (!sessionReady || (isDemo && showPreLaunch)) {
-    return <PreLaunchView phase={phase} qr={healthQr || qr} isDemo={isDemo} />
+    return (
+      <PreLaunchView
+        phase={phase}
+        qr={healthQr || qr}
+        isDemo={isDemo}
+        connectionError={socketError}
+      />
+    )
   }
 
   // ─── Connected Dashboard ─────────────────────────────────────
