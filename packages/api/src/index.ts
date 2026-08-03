@@ -2,6 +2,7 @@ export { ApiServer, createApiServer } from './createApiServer';
 export { createApiMiddleware } from './createApiMiddleware';
 export { apiKeyMiddleware } from './auth/api-key';
 export { rateLimitMiddleware } from './middleware/rate-limit';
+export { mountDashboardProduction } from './dashboard/middleware';
 export { type EventBridge } from './events/EventBridge';
 export { EventBroadcaster, type EventStreamOptions, type SseEventEnvelope } from './events/EventBroadcaster';
 export { invokeClientMethod, type ClientMethodDefinitionLike } from './invoke-client-method';
