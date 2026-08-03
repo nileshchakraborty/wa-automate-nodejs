@@ -69,11 +69,22 @@ export function useSocket() {
       }
     }
 
-    connect()
+    const reconnect = () => {
+      cleanupListeners?.()
+      cleanupListeners = undefined
+      clientRef.current = null
+      setConnected(false)
+      setError(null)
+      void connect()
+    }
+
+    void connect()
+    window.addEventListener("openwa:reconnect", reconnect)
 
     return () => {
       mounted = false
       cleanupListeners?.()
+      window.removeEventListener("openwa:reconnect", reconnect)
     }
   }, [isDemo])
 
