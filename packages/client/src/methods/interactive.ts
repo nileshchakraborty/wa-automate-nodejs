@@ -27,7 +27,7 @@ async function invokeSender(client: Client, request:
   const result = await client.evaluate(async input => {
     try {
       if (typeof WAPI[input.method] !== 'function') {
-        throw new Error(`${input.method} is unavailable in this session. Start the client with an Insiders-or-higher license and an up-to-date license payload.`);
+        throw new Error(`${input.method} is unavailable in this session because its runtime method is missing.`);
       }
       const id = input.method === 'sendInteractive'
         ? await WAPI.sendInteractive!(input.to, input.content)

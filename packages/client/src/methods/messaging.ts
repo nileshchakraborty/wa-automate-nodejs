@@ -108,12 +108,12 @@ export function messagingMethods(client: Client): MessagingMethods {
         });
       }
       if (result === 'Not a contact') {
-        const message = 'Starting a chat with a new number requires an applied restricted or premium license.';
-        client.logger.error('send_text_unknown_number_requires_license', {
+        const message = 'WhatsApp rejected the recipient as an unknown contact.';
+        client.logger.error('send_text_unknown_contact', {
           sessionId: client.sessionId,
           detail: message,
         });
-        throw new SendTextError(message, { code: 'LICENSE_REQUIRED', outcome: 'not_sent' });
+        throw new SendTextError(message, { code: 'SEND_REJECTED', outcome: 'not_sent' });
       }
       if (result === 'Not able to send message to broadcast') {
         throw new SendTextError('sendText cannot send to status@broadcast. Use a supported chat ID.', {

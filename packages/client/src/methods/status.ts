@@ -2,7 +2,7 @@ import type { Client } from '../Client';
 import { invokePatch } from '../patchRuntime';
 import { resolveMediaInput, mediaSendResult, type MediaInput, type MediaSendResult } from '../mediaInput';
 
-/** Status posting requires the corresponding licensed story payloads. */
+/** Status posting requires the corresponding runtime methods. */
 export interface StatusMethods {
   postTextStatus(text: string, backgroundColor?: string, font?: number): Promise<MediaSendResult>;
   postImageStatus(image: MediaInput, caption?: string): Promise<MediaSendResult>;
