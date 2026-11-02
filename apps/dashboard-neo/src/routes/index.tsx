@@ -3,7 +3,7 @@ import { useSession } from "@/lib/hooks/use-session"
 import { useSocket } from "@/lib/hooks/use-socket"
 import { useEvents, type EventLog } from "@/lib/hooks/use-events"
 import { useHealth } from "@/lib/hooks/use-health"
-import { getClient, getApiKey, getApiUrl, setApiKey, resetClient } from "@/lib/api-client"
+import { getClient, getApiKey, setApiKey, resetClient } from "@/lib/api-client"
 import { useDemo } from "@/lib/demo/use-demo"
 import { usePrivacy } from "@/lib/hooks/use-privacy"
 import { getLaunchPhase } from "@/lib/launch-phase"
@@ -35,8 +35,6 @@ import {
   Loader2,
   Hash,
   KeyRound,
-  Sparkles,
-  Download,
   type LucideIcon,
 } from "lucide-react"
 import { useMemo, useState, useEffect, useRef } from "react"
@@ -124,56 +122,6 @@ function PreLaunchView({
 
   const [apiKeyVal, setApiKeyVal] = useState(getApiKey())
   const [keyNotice, setKeyNotice] = useState<string | null>(null)
-  const [keyBusy, setKeyBusy] = useState(false)
-
-  const handleFetchKey = async () => {
-    setKeyBusy(true)
-    try {
-      const res = await fetch(`${getApiUrl()}/api-key`)
-      if (res.ok) {
-        const data = (await res.json()) as { apiKey?: string; key?: string }
-        const key = data.apiKey || data.key
-        if (key) {
-          setApiKey(key)
-          setApiKeyVal(key)
-          setKeyNotice("Key retrieved from server!")
-          resetClient()
-          window.dispatchEvent(new Event("openwa:reconnect"))
-          return
-        }
-      }
-      setKeyNotice("Could not auto-fetch key")
-    } catch {
-      setKeyNotice("Could not reach server")
-    } finally {
-      setKeyBusy(false)
-    }
-  }
-
-  const handleGenerateKey = async () => {
-    setKeyBusy(true)
-    try {
-      const res = await fetch(`${getApiUrl()}/api-key/generate`, { method: "POST" })
-      if (res.ok) {
-        const data = (await res.json()) as { apiKey?: string; key?: string }
-        const key = data.apiKey || data.key
-        if (key) {
-          setApiKey(key)
-          setApiKeyVal(key)
-          setKeyNotice("New random key generated & connected!")
-          resetClient()
-          window.dispatchEvent(new Event("openwa:reconnect"))
-          return
-        }
-      }
-      setKeyNotice("Key generation failed")
-    } catch {
-      setKeyNotice("Could not reach server")
-    } finally {
-      setKeyBusy(false)
-    }
-  }
-
   const handleSaveKey = () => {
     const trimmed = apiKeyVal.trim()
     setApiKey(trimmed)
@@ -326,7 +274,7 @@ function PreLaunchView({
 
         <p className="text-xs text-muted-foreground">
           {connectionFailed
-            ? "Authentication required. Generate or auto-fetch a key to pair with your WhatsApp session."
+            ? "Authentication required. Enter the configured API key to pair with your WhatsApp session."
             : "Active API key used to communicate with this OpenWA instance."}
         </p>
 
@@ -335,37 +283,15 @@ function PreLaunchView({
             type="text"
             value={apiKeyVal}
             onChange={(e) => setApiKeyVal(e.target.value)}
-            placeholder="Enter or auto-generate API key"
+            placeholder="Enter API key"
             className="flex-1 rounded-md border bg-background px-3 py-1.5 font-mono text-xs"
           />
           <div className="flex gap-1.5">
             <Button
               type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void handleFetchKey()}
-              disabled={keyBusy}
-              className="text-xs"
-            >
-              <Download size={13} className="mr-1" />
-              Auto-fill
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void handleGenerateKey()}
-              disabled={keyBusy}
-              className="text-xs"
-            >
-              <Sparkles size={13} className="mr-1" />
-              Generate
-            </Button>
-            <Button
-              type="button"
               size="sm"
               onClick={handleSaveKey}
-              disabled={keyBusy || !apiKeyVal.trim()}
+              disabled={!apiKeyVal.trim()}
               className="text-xs"
             >
               Connect

@@ -99,24 +99,6 @@ export function ConnectionBadge() {
     setApiKeyInput("")
   }
 
-  const generateLegacyApiKey = async () => {
-    setBusy(true)
-    setAuthError(null)
-    try {
-      const res = await fetch(`${getApiUrl()}/api-key/generate`, { method: "POST" })
-      if (!res.ok) throw new Error(`Key generation failed (HTTP ${res.status})`)
-      const data = (await res.json()) as { apiKey?: string; key?: string }
-      const key = data.apiKey || data.key
-      if (!key) throw new Error("No API key returned")
-      setApiKeyInput(key)
-      setApiKey(key)
-    } catch (err) {
-      setAuthError(err instanceof Error ? err.message : "Failed to generate key")
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const newProfile = () => {
     setProfileId("")
     setProfileName("")
@@ -432,7 +414,6 @@ export function ConnectionBadge() {
               onApiKey={setApiKeyInput}
               onApply={applyServerSettings}
               onDelete={removeProfile}
-              onGenerateApiKey={generateLegacyApiKey}
               onHost={setHost}
               onNew={newProfile}
               onPort={setPort}
@@ -457,7 +438,6 @@ function LegacyConnectionSettings({
   onApiKey,
   onApply,
   onDelete,
-  onGenerateApiKey,
   onHost,
   onNew,
   onPort,
@@ -474,7 +454,6 @@ function LegacyConnectionSettings({
   onApiKey: (value: string) => void
   onApply: () => void
   onDelete: () => void
-  onGenerateApiKey?: () => void
   onHost: (value: string) => void
   onNew: () => void
   onPort: (value: string) => void
@@ -515,16 +494,6 @@ function LegacyConnectionSettings({
           placeholder="API key (memory only)"
           className="h-8 flex-1 rounded-md border bg-background px-3 font-mono text-xs"
         />
-        {onGenerateApiKey && (
-          <button
-            type="button"
-            onClick={onGenerateApiKey}
-            title="Generate fresh API key from OpenWA"
-            className="h-8 rounded-md border bg-muted px-2.5 text-xs font-medium hover:bg-muted/80"
-          >
-            Generate
-          </button>
-        )}
       </div>
       <div className="flex items-center justify-between pt-2">
         <div>

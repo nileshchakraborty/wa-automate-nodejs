@@ -1,15 +1,14 @@
 import { useState, useEffect } from "react"
-import { KeyRound, Copy, Check, Sparkles, Download } from "lucide-react"
+import { KeyRound, Copy, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@open-wa/ui-components/popover"
-import { getApiKey, getApiUrl, resetClient, setApiKey } from "@/lib/api-client"
+import { getApiKey, resetClient, setApiKey } from "@/lib/api-client"
 
 export function ApiKeyBadge() {
   const [key, setKey] = useState(getApiKey())
   const [inputVal, setInputVal] = useState(getApiKey())
   const [copied, setCopied] = useState(false)
-  const [loading, setLoading] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
 
@@ -24,50 +23,6 @@ export function ApiKeyBadge() {
     await navigator.clipboard.writeText(key)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
-  }
-
-  const handleFetchKey = async () => {
-    setLoading(true)
-    setNotice(null)
-    try {
-      const res = await fetch(`${getApiUrl()}/api-key`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as { apiKey?: string; key?: string }
-      const fetchedKey = data.apiKey || data.key
-      if (!fetchedKey) throw new Error("No key returned")
-      setApiKey(fetchedKey)
-      setKey(fetchedKey)
-      setInputVal(fetchedKey)
-      setNotice("API key auto-filled from server!")
-      resetClient()
-      window.dispatchEvent(new Event("openwa:reconnect"))
-    } catch {
-      setNotice("Failed to fetch key from server")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleGenerateKey = async () => {
-    setLoading(true)
-    setNotice(null)
-    try {
-      const res = await fetch(`${getApiUrl()}/api-key/generate`, { method: "POST" })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as { apiKey?: string; key?: string }
-      const newKey = data.apiKey || data.key
-      if (!newKey) throw new Error("No key generated")
-      setApiKey(newKey)
-      setKey(newKey)
-      setInputVal(newKey)
-      setNotice("New random API key generated & applied!")
-      resetClient()
-      window.dispatchEvent(new Event("openwa:reconnect"))
-    } catch {
-      setNotice("Failed to generate key")
-    } finally {
-      setLoading(false)
-    }
   }
 
   const handleSave = () => {
@@ -120,41 +75,15 @@ export function ApiKeyBadge() {
             type="text"
             value={inputVal}
             onChange={(e) => setInputVal(e.target.value)}
-            placeholder="Enter API key or generate"
+            placeholder="Enter API key"
             className="h-8 font-mono text-xs"
           />
-        </div>
-
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void handleFetchKey()}
-            disabled={loading}
-            className="flex-1 text-[11px]"
-          >
-            <Download size={12} className="mr-1" />
-            Auto-fill
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void handleGenerateKey()}
-            disabled={loading}
-            className="flex-1 text-[11px]"
-          >
-            <Sparkles size={12} className="mr-1" />
-            Generate
-          </Button>
         </div>
 
         <Button
           type="button"
           size="sm"
           onClick={handleSave}
-          disabled={loading}
           className="w-full text-xs"
         >
           Apply &amp; Reconnect

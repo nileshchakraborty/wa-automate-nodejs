@@ -11,7 +11,6 @@ import {
   CheckCircle2,
   XCircle,
   Minus,
-  ShieldCheck,
   RefreshCw,
   Wrench,
   Rocket,
@@ -27,7 +26,6 @@ function HealthPage() {
   const {
     timeline,
     patches,
-    license,
     reconnections,
     loading,
     error,
@@ -37,7 +35,7 @@ function HealthPage() {
   } = useHealth()
 
   const totalLaunchTime = timeline.reduce((sum, s) => sum + s.durationMs, 0)
-  const hasData = timeline.length > 0 || patches.length > 0 || license !== null
+  const hasData = timeline.length > 0 || patches.length > 0
 
   return (
     <div className="dashboard-page space-y-6">
@@ -60,7 +58,7 @@ function HealthPage() {
             )}
           </div>
           <p className="text-sm text-muted-foreground">
-            Launch timeline, patches, license status, and session health
+            Launch timeline, patches, and session health
           </p>
         </div>
         {!isDemo && (
@@ -154,18 +152,6 @@ function HealthPage() {
                 }
                 icon={<CheckCircle2 size={14} />}
                 variant={connected ? "success" : "error"}
-              />
-              <MiniCard
-                label="License"
-                value={license?.status || "none"}
-                icon={<ShieldCheck size={14} />}
-                variant={
-                  license?.status === "valid"
-                    ? "success"
-                    : license
-                      ? "warning"
-                      : "neutral"
-                }
               />
               <MiniCard
                 label="Reconnections"
@@ -320,52 +306,6 @@ function HealthPage() {
               </div>
             </div>
 
-            {/* License */}
-            <div className="rounded-2xl border border-border-button-default bg-card">
-              <div className="flex items-center gap-2 border-b px-5 py-3">
-                <ShieldCheck size={16} className="text-primary" />
-                <h2 className="text-sm font-semibold">License</h2>
-              </div>
-              <div className="p-5">
-                {license ? (
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`flex size-12 items-center justify-center rounded-xl ${
-                          license.status === "valid"
-                            ? "bg-emerald-500/15"
-                            : "bg-red-500/15"
-                        }`}
-                      >
-                        <ShieldCheck
-                          size={24}
-                          className={
-                            license.status === "valid"
-                              ? "text-emerald-500"
-                              : "text-red-500"
-                          }
-                        />
-                      </div>
-                      <div>
-                        <div className="text-sm font-semibold capitalize">
-                          {license.status}
-                        </div>
-                        <div className="text-xs text-muted-foreground capitalize">
-                          {license.keyType} · {license.source}
-                        </div>
-                      </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {license.detail}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-                    No license data available
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
 
           {/* Reconnections */}
