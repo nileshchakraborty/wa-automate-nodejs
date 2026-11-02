@@ -8,7 +8,7 @@ import { rateLimitMiddleware } from '../middleware/rate-limit';
 export function registerSessionRefreshRoutes(app: Hono, config: Config, getClient: () => ClientMethodMap | undefined) {
   const controls = new Hono();
   controls.use('*', rateLimitMiddleware(100, 60_000));
-  if (config.apiKey) controls.use('*', apiKeyMiddleware(config.apiKey));
+  controls.use('*', apiKeyMiddleware(() => config.apiKey));
   controls.get('/', async c => {
     c.header('Cache-Control', 'no-store');
     const client = getClient();

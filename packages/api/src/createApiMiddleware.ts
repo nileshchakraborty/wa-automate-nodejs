@@ -89,9 +89,7 @@ export function createApiMiddleware(clientSource: ClientSource, options: ApiMidd
 
   app.use('/*', rateLimitMiddleware(100, 60000));
 
-  if (options.config.apiKey) {
-    app.use('/*', apiKeyMiddleware(options.config.apiKey));
-  }
+  app.use('/*', apiKeyMiddleware(() => options.config.apiKey));
 
   const handleInvocation = async (
     c: any,

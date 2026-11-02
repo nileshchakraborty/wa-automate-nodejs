@@ -15,11 +15,15 @@ function apiKeysMatch(candidate: string, expected: string): boolean {
     && timingSafeEqual(candidateBuffer, expectedBuffer);
 }
 
-export function apiKeyMiddleware(apiKey: string) {
+export function apiKeyMiddleware(apiKeyOrGetter: string | (() => string | undefined)) {
   return async (c: Context, next: Next) => {
+    const expectedKey = typeof apiKeyOrGetter === 'function' ? apiKeyOrGetter() : apiKeyOrGetter;
+    if (!expectedKey) {
+      return await next();
+    }
     const resolvedKey = c.req.header('X-API-Key');
 
-    if (!resolvedKey || !apiKeysMatch(resolvedKey, apiKey)) {
+    if (!resolvedKey || !apiKeysMatch(resolvedKey, expectedKey)) {
       return c.json({ error: 'Unauthorized', details: 'Invalid or missing API key' }, 401);
     }
 

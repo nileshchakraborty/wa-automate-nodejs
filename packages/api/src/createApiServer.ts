@@ -370,16 +370,14 @@ export class ApiServer {
       }),
     );
 
-    if (this.config.apiKey) {
-      const requireApiKey = apiKeyMiddleware(this.config.apiKey);
-      this.app.use('/*', async (c, next) => {
-        const path = new URL(c.req.url).pathname;
-        if (isPublicRoute(c.req.method, path)) {
-          return next();
-        }
-        return requireApiKey(c, next);
-      });
-    }
+    const requireApiKey = apiKeyMiddleware(() => this.config.apiKey);
+    this.app.use('/*', async (c, next) => {
+      const path = new URL(c.req.url).pathname;
+      if (isPublicRoute(c.req.method, path)) {
+        return next();
+      }
+      return requireApiKey(c, next);
+    });
 
     this.app.use('/*', async (c, next) => {
       const path = new URL(c.req.url).pathname;
