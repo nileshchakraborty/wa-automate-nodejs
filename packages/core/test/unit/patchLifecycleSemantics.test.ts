@@ -26,10 +26,29 @@ afterEach(() => {
 });
 
 describe('transport patch lifecycle semantics', () => {
+  it('uses bundled core patches by default without disk cache or remote fetch', async () => {
+    const transport = createTransport();
+    const fetchSpy = vi.spyOn(httpClient, 'fetchPatches');
+    const loadCachedSpy = vi.spyOn(transport as never as { loadCachedLivePatches: () => Promise<unknown> }, 'loadCachedLivePatches');
+
+    const result = await (transport as never as {
+      fetchLivePatchesWithCache: () => Promise<{ source: string; tag: string; data: string[] }>;
+    }).fetchLivePatchesWithCache();
+
+    expect(result.source).toBe('cached');
+    expect(result.data.length).toBeGreaterThan(0);
+    expect(loadCachedSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('keeps disk cache opt-in instead of reading or writing it by default', async () => {
     const transport = createTransport({ cachedPatch: false });
     const loadCachedSpy = vi.spyOn(transport as never as { loadCachedLivePatches: () => Promise<unknown> }, 'loadCachedLivePatches');
     const saveCachedSpy = vi.spyOn(transport as never as { saveCachedLivePatches: (value: unknown) => Promise<void> }, 'saveCachedLivePatches');
+    vi.spyOn(transport as never as { loadBundledLivePatches: () => Promise<{ data: string[]; tag: string }> }, 'loadBundledLivePatches').mockResolvedValue({
+      data: [],
+      tag: 'bundled',
+    });
     const fetchSpy = vi.spyOn(httpClient, 'fetchPatches').mockResolvedValue({
       data: ['console.log("remote")'],
       tag: 'remote-tag',

@@ -944,14 +944,16 @@ export class Transport {
       let remoteFetchResult: LivePatchFetchResult | null = null;
 
       try {
-        remoteFetchResult = options?.fresh
-          ? { ...(await this.fetchFreshLivePatches(options.sessionInfo, true)), source: 'remote' }
-          : await this.fetchLivePatchesWithCache(options?.sessionInfo);
+        if (options?.fresh && this.patchConfig.ghPatch === true) {
+          remoteFetchResult = { ...(await this.fetchFreshLivePatches(options.sessionInfo, true)), source: 'remote' };
+        } else {
+          remoteFetchResult = await this.fetchLivePatchesWithCache(options?.sessionInfo);
+        }
         if (options?.fresh && (!remoteFetchResult.data.length || remoteFetchResult.data.some(script => !script.trim()))) {
           throw new Error('The public patch bundle is empty.');
         }
       } catch (fetchError) {
-        if (options?.fresh) throw new Error('Fresh public patches could not be downloaded.');
+        if (options?.fresh && this.patchConfig.ghPatch === true) throw new Error('Fresh public patches could not be downloaded.');
         const fetchMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
         this.logger.warn('remote_patch_fetch_failed', { error: fetchMsg });
         // Fall back to bundled offline patches if remote fetch fails
@@ -3050,7 +3052,7 @@ export class Transport {
     }
 
     // Default: use core bundled patches (offline, zero external network dependency) unless explicit remote patch requested
-    if (this.patchConfig.ghPatch !== true && this.patchConfig.cachedPatch !== false) {
+    if (this.patchConfig.ghPatch !== true) {
       try {
         const bundled = await this.loadBundledLivePatches();
         if (bundled.data.length > 0) {
