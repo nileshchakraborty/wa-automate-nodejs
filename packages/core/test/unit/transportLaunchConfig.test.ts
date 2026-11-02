@@ -351,8 +351,8 @@ describe('Transport launch/config plumbing', () => {
     expect((await transport.getSessionDebugInfo()).hostNumber).toBe('1234567890@c.us');
   });
 
-  it('does not expose an unrecognized license key as its key type', async () => {
-    const opaqueKey = 'opaqueTestToken123456789';
+  it.each(['opaqueTestToken123456789', 'invalid-demo-license', 'expired-demo-license'])(
+    'uses local community access without exposing a supplied key (%s)', async (opaqueKey) => {
     const transport = new Transport({
       driver: new CaptureDriver(new TestBrowser(new TestPage())),
       events: createEvents(),
@@ -364,8 +364,11 @@ describe('Transport launch/config plumbing', () => {
       licenseKey: opaqueKey,
     });
 
-    expect(result.artifact?.keyType).toBe('license');
+    expect(result.status).toBe('valid');
+    expect(result.blockingFailure).toBe(false);
+    expect(result.artifact?.keyType).toBe('Insiders Program');
     expect(result.artifact?.payload).not.toContain(opaqueKey);
+    expect(result.artifact?.expiresAt).toBeNull();
   });
 
   it('forwards userDataDir to driver launch options', async () => {

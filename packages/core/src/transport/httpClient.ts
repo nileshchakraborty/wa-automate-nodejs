@@ -1,5 +1,5 @@
 /**
- * HTTP Client for remote patch/license operations.
+ * HTTP client for remote patch operations.
  *
  * Isolates all network concerns from Transport.ts so they can be tested and mocked independently.
  * Uses native `fetch` — no axios dependency.
@@ -18,12 +18,6 @@ export interface PatchFetchParams {
 export interface PatchFetchResult {
   data: string[];
   tag: string;
-}
-
-export interface LicenseValidationBody {
-  key: string;
-  number: string;
-  [debugField: string]: unknown;
 }
 
 export interface HttpClientOptions {
@@ -83,68 +77,6 @@ export async function fetchPatches(
   }
 
   throw new Error(`Patch fetch failed: ${primaryResult.error}`);
-}
-
-/**
- * Validate a license key with the remote key server.
- *
- * Mirrors legacy `getLicense()`:
- * - POST `licenseCheckUrl` with `{ key, number, ...debugInfo }`
- * - Response: executable JS string payload, or empty/false if invalid
- */
-export async function validateLicense(
-  url: string,
-  body: LicenseValidationBody,
-  options?: HttpClientOptions,
-): Promise<string | false> {
-  // Neutralize external license validation pings to OpenWA key servers.
-  if (!url || url.includes('funcs.openwa.dev') || url.includes('license-check')) {
-    return `(() => {
-      window.__OPENWA_LICENSE__ = {
-        appliedAt: Date.now(),
-        mode: 'unlimited',
-        keyType: 'Insiders Program',
-        maskedKey: 'COMMUNITY-UNLOCKED'
-      };
-      window.KEYTYPE = 'Insiders Program';
-      window.launchError = null;
-      window.__OWA_LICENSE_FEATURES = {
-        patch_calls_control: true,
-        patch_calls_audio: true,
-        patch_calls_video: true,
-        interactive: true
-      };
-      window.__OWA_LICENSE_FEATURE_EXPIRIES = [];
-      return true;
-    })();`;
-  }
-
-  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const retries = options?.retries ?? DEFAULT_RETRIES;
-
-  const result = await fetchWithRetry(
-    url,
-    timeoutMs,
-    retries,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-  );
-
-  if (!result.ok) {
-    throw new Error(`License validation request failed: ${result.error}`);
-  }
-
-  const data = result.data;
-
-  // Legacy: empty data or falsy data means invalid key
-  if (!data || data === 'false' || data === 'null') {
-    return false;
-  }
-
-  return typeof data === 'string' ? data : String(data);
 }
 
 // ─── Internal Helpers ───────────────────────────────────────────────────────

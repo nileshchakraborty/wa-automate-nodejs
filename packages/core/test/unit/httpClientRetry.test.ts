@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  fetchPatches,
-  validateLicense,
-} from '../../src/transport/httpClient.js';
+import { fetchPatches } from '../../src/transport/httpClient.js';
 
 /** Build a Response-like object good enough for httpClient. */
 function res(
@@ -103,27 +100,4 @@ describe('httpClient retry semantics', () => {
     expect(result.data).toEqual(['ok();']);
   });
 
-  it('validateLicense returns false for empty/false payloads', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValue(res(200, JSON.stringify('false'))),
-    );
-    await expect(
-      validateLicense('https://lic.example', { key: 'k', number: 'n' }),
-    ).resolves.toBe(false);
-  });
-
-  it('validateLicense returns the payload string on success', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValue(res(200, JSON.stringify('unlock();'))),
-    );
-    await expect(
-      validateLicense('https://lic.example', { key: 'k', number: 'n' }),
-    ).resolves.toBe('unlock();');
-  });
 });

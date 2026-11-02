@@ -847,7 +847,7 @@ describe('bootstrap contract harness', () => {
     }
   });
 
-  it('Phase E: missing license stays observable and explicitly non-blocking for readiness', async () => {
+  it('Phase E: community runtime is ready without a licence key', async () => {
     const { client, recordedEvents } = await createHarness({
       runtimeAvailable: true,
       storeMsgAvailable: true,
@@ -866,7 +866,7 @@ describe('bootstrap contract harness', () => {
     }
 
     const payload = licenseCheckEvent.payload as { details?: { status?: string } } | undefined;
-    expect(payload?.details?.status).toBe('missing');
+    expect(payload?.details?.status).toBe('valid');
 
     const readyIndex = findEventIndex(recordedEvents, 'client.ready');
     expect(readyIndex).toBeGreaterThan(-1);
@@ -876,7 +876,7 @@ describe('bootstrap contract harness', () => {
     await client.stop('phase_e_missing_license_cleanup');
   });
 
-  it('Phase E: invalid license remains observable without blocking public readiness', async () => {
+  it('Phase E: an invalid supplied key cannot restrict community runtime', async () => {
     const { client, recordedEvents } = await createHarness({
       runtimeAvailable: true,
       storeMsgAvailable: true,
@@ -892,27 +892,24 @@ describe('bootstrap contract harness', () => {
 
     expect(client.getReadiness()).toMatchObject({
       ready: true,
-      requirements: { licenseLifecycle: { state: 'non_blocking' } },
+      requirements: { licenseLifecycle: { state: 'satisfied' } },
     });
     expect(recordedEvents.filter((event) => event.name === 'client.ready')).toHaveLength(1);
 
-    const invalidCheckIndex = recordedEvents.findIndex((event) => {
+    const validCheckIndex = recordedEvents.findIndex((event) => {
       if (event.name !== 'launch.license.check.after') return false;
       const payload = event.payload as { details?: { status?: string } } | undefined;
-      return payload?.details?.status === 'invalid';
+      return payload?.details?.status === 'valid';
     });
 
-    if (invalidCheckIndex === -1) {
-      throw new Error('Expected invalid license path to emit launch.license.check.after with status=invalid.');
+    if (validCheckIndex === -1) {
+      throw new Error('Expected community access to emit launch.license.check.after with status=valid.');
     }
-
-    const finalizeIndex = findEventIndex(recordedEvents, 'launch.client.finalize.before');
-    expect(finalizeIndex).toBeGreaterThan(invalidCheckIndex);
 
     await client.stop('phase_e_invalid_license_cleanup');
   });
 
-  it('Phase E: expired license remains observable without blocking public readiness', async () => {
+  it('Phase E: an expired supplied key cannot restrict community runtime', async () => {
     const { client, recordedEvents } = await createHarness({
       runtimeAvailable: true,
       storeMsgAvailable: true,
@@ -928,22 +925,19 @@ describe('bootstrap contract harness', () => {
 
     expect(client.getReadiness()).toMatchObject({
       ready: true,
-      requirements: { licenseLifecycle: { state: 'non_blocking' } },
+      requirements: { licenseLifecycle: { state: 'satisfied' } },
     });
     expect(recordedEvents.filter((event) => event.name === 'client.ready')).toHaveLength(1);
 
-    const expiredCheckIndex = recordedEvents.findIndex((event) => {
+    const validCheckIndex = recordedEvents.findIndex((event) => {
       if (event.name !== 'launch.license.check.after') return false;
       const payload = event.payload as { details?: { status?: string } } | undefined;
-      return payload?.details?.status === 'expired';
+      return payload?.details?.status === 'valid';
     });
 
-    if (expiredCheckIndex === -1) {
-      throw new Error('Expected expired license path to emit launch.license.check.after with status=expired.');
+    if (validCheckIndex === -1) {
+      throw new Error('Expected community access to emit launch.license.check.after with status=valid.');
     }
-
-    const finalizeIndex = findEventIndex(recordedEvents, 'launch.client.finalize.before');
-    expect(finalizeIndex).toBeGreaterThan(expiredCheckIndex);
 
     await client.stop('phase_e_expired_license_cleanup');
   });
@@ -1847,200 +1841,4 @@ describe('bootstrap contract harness', () => {
     });
   });
 
-  describe('payload depth: license server validation', () => {
-    it('retries license preload after the live patch reveals the host ID', async () => {
-      const unknownHost = {
-        WA_VERSION: '2.3000.0',
-        WA_AUTOMATE_VERSION: '5.0.0',
-        hostNumber: '',
-      };
-      const resolvedHost = { ...unknownHost, hostNumber: '1234567890@c.us' };
-      const debugSpy = vi.spyOn(Transport.prototype, 'getSessionDebugInfo')
-        .mockResolvedValueOnce(unknownHost)
-        .mockResolvedValueOnce(resolvedHost);
-      const originalPreload = Transport.prototype.preloadLicenseArtifact;
-      const licensePreloadSpy = vi.spyOn(Transport.prototype, 'preloadLicenseArtifact')
-        .mockImplementation(function (this: Transport, options) {
-          if (!options.sessionInfo?.hostNumber) {
-            return originalPreload.call(this, options);
-          }
-          return Promise.resolve({
-            outcome: 'ready',
-            status: 'valid',
-            source: 'local',
-            artifact: {
-              key: 'insiders-test-key-12345',
-              maskedKey: '******************2345',
-              source: 'local',
-              payload: 'window.__OPENWA_LICENSE__ = {}; window.KEYTYPE = "insiders"; true',
-              keyType: 'insiders',
-              payloadSource: 'server',
-            },
-            blockingFailure: false,
-          });
-        });
-      vi.spyOn(Transport.prototype as any, 'fetchLivePatchesWithCache').mockResolvedValue({
-        data: [],
-        tag: 'empty',
-        source: 'remote',
-      });
-
-      const { client, recordedEvents } = await createHarness({
-        runtimeAvailable: true,
-        storeMsgAvailable: true,
-        sessionLoaded: true,
-        licenseKey: 'insiders-test-key-12345',
-      });
-
-      expect(await settleStart(client)).toMatchObject({ status: 'resolved' });
-      expect(debugSpy).toHaveBeenCalledTimes(2);
-      expect(licensePreloadSpy).toHaveBeenCalledWith(expect.objectContaining({
-        sessionInfo: expect.objectContaining({ hostNumber: '1234567890@c.us' }),
-      }));
-      expect(recordedEvents).toContainEqual(expect.objectContaining({
-        name: 'launch.license.check.after',
-        payload: expect.objectContaining({
-          details: expect.objectContaining({ status: 'valid' }),
-        }),
-      }));
-
-      await client.stop('license_host_recovery_cleanup');
-    });
-
-    it('passes host number to license validation server for round-trip check', async () => {
-      // Mock getSessionDebugInfo to return a host number
-      const debugSpy = vi.spyOn(
-        Transport.prototype,
-        'getSessionDebugInfo',
-      ).mockResolvedValue({
-        WA_VERSION: '2.2350.0',
-        WA_AUTOMATE_VERSION: '5.0.0',
-        hostNumber: '1234567890@c.us',
-        BROWSER_VERSION: 'fake-browser',
-        PAGE_UA: 'test-ua',
-        OS: 'test',
-        NUM_HASH: 'a1b2c',
-      });
-
-      // Intercept the validateLicense call at the Transport level
-      // by mocking fetchLivePatchesWithCache and using a spy on the license side
-      const fetchSpy = vi.spyOn(
-        Transport.prototype as any,
-        'fetchLivePatchesWithCache',
-      ).mockResolvedValue({
-        data: [],
-        tag: 'empty',
-        source: 'remote' as const,
-      });
-
-      const { client, recordedEvents } = await createHarness({
-        runtimeAvailable: true,
-        storeMsgAvailable: true,
-        sessionLoaded: true,
-        licenseKey: 'insiders-test-key-12345',
-      });
-
-      const startResult = await settleStart(client);
-
-      // The debug info spy should have been called (proving session info plumbing works)
-      expect(debugSpy).toHaveBeenCalledTimes(1);
-
-      // The license preload event should show success
-      const licensePreloadAfter = recordedEvents.find(
-        (e) => e.name === 'launch.license.preload.after',
-      );
-
-      expect(licensePreloadAfter).toBeDefined();
-
-      const details = (licensePreloadAfter?.payload as Record<string, unknown>)?.details as
-        | Record<string, unknown>
-        | undefined;
-      expect(details?.success).toBe(true);
-
-      await client.stop('payload_depth_license_cleanup');
-      debugSpy.mockRestore();
-      fetchSpy.mockRestore();
-    });
-
-    it('classifies local_metadata fallback distinctly from a server-confirmed license unlock', async () => {
-      // Mock getSessionDebugInfo to provide host info
-      const debugSpy = vi.spyOn(
-        Transport.prototype,
-        'getSessionDebugInfo',
-      ).mockResolvedValue({
-        WA_VERSION: '2.2350.0',
-        WA_AUTOMATE_VERSION: '5.0.0',
-        hostNumber: '1234567890@c.us',
-        BROWSER_VERSION: 'fake-browser',
-        PAGE_UA: 'test-ua',
-        OS: 'test',
-        NUM_HASH: 'a1b2c',
-      });
-
-      const fetchSpy = vi.spyOn(
-        Transport.prototype as any,
-        'fetchLivePatchesWithCache',
-      ).mockResolvedValue({
-        data: [],
-        tag: 'empty',
-        source: 'remote' as const,
-      });
-
-      // Direct unit test: create a Transport with license config set to offline mode,
-      // confirming it falls back to local_metadata (no server round-trip)
-      const { client, recordedEvents } = await createHarness({
-        runtimeAvailable: true,
-        storeMsgAvailable: true,
-        sessionLoaded: true,
-        licenseKey: 'community-valid-license',
-      });
-
-      // Override the licenseConfig to force offline mode (no server call)
-      (client.getTransport() as any).licenseConfig = { offlineLicenseMode: true };
-
-      const startResult = await settleStart(client);
-
-      if (startResult.status !== 'resolved') {
-        throw new Error(`Expected metadata-only fallback bootstrap fixture to resolve, but start() rejected with: ${String(startResult.error)}`);
-      }
-
-      const licensePreloadAfter = recordedEvents.find(
-        (e) => e.name === 'launch.license.preload.after',
-      );
-
-      expect(licensePreloadAfter).toBeDefined();
-      const details = (licensePreloadAfter?.payload as Record<string, unknown>)?.details as
-        | Record<string, unknown>
-        | undefined;
-      expect(details?.success).toBe(true);
-      expect(details?.status).toBe('metadata_only');
-      expect(details?.payloadSource).toBe('local_metadata');
-
-      const licenseCheckAfter = recordedEvents.find(
-        (e) => e.name === 'launch.license.check.after',
-      );
-
-      expect(licenseCheckAfter).toBeDefined();
-
-      const checkDetails = (licenseCheckAfter?.payload as Record<string, unknown>)?.details as
-        | Record<string, unknown>
-        | undefined;
-      expect(checkDetails?.status).toBe('metadata_only');
-      expect(checkDetails?.payloadSource).toBe('local_metadata');
-
-      expect(client.getReadiness()).toMatchObject({
-        ready: true,
-        status: 'ready',
-        requirements: {
-          licenseLifecycle: {
-            state: 'non_blocking',
-          },
-        },
-      });
-
-      await client.stop('payload_depth_fallback_cleanup');
-      debugSpy.mockRestore();
-      fetchSpy.mockRestore();
-    });
-  });
 });

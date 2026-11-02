@@ -20,7 +20,7 @@ import type {
 import type { HyperEmitter } from '@open-wa/hyperemitter';
 import type { Logger } from '@open-wa/logger';
 import type { OpenWAEventMap, STATE } from '../events/eventMap';
-import { fetchPatches, validateLicense } from './httpClient';
+import { fetchPatches } from './httpClient';
 import { installDocumentRuntime } from '../livePatch/installDocument';
 import { InjectionController, type GenerationSnapshot } from './InjectionController';
 import { getProgObserverScript, injectInitPatch } from './initPatchScripts';
@@ -342,8 +342,6 @@ const INIT_PATCH_ARTIFACT: PatchArtifact = {
 const DEFAULT_LIVE_PATCHES_URL = 'https://cdn.openwa.dev/patches.json';
 /** Fallback GitHub raw live-patches URL */
 const GH_LIVE_PATCHES_FALLBACK_URL = 'https://raw.githubusercontent.com/open-wa/wa-automate-nodejs/master/patches.json';
-/** OpenWA license validation endpoint. */
-const DEFAULT_LICENSE_CHECK_URL = 'https://funcs.openwa.dev/license-check';
 /** Live-patch cache file path relative to cwd */
 const LIVE_PATCH_CACHE_FILENAME = 'patches.cache.json';
 /** Live-patch cache staleness threshold (24 hours in ms) */
@@ -382,7 +380,6 @@ export class Transport {
   private lastQrData: string | null = null;
   private lastRuntimeState: STATE | null = null;
   private patchConfig: PatchFetchConfig;
-  private licenseConfig: LicenseServerConfig;
   private pageListeners: DisposableHandle[] = [];
   private readonly injectionController: InjectionController;
   private runtimeRecoveryQueue: Promise<void> = Promise.resolve();
@@ -396,9 +393,6 @@ export class Transport {
   readonly calling: CallingService;
   private retainedLicenseArtifact?: LicenseArtifact;
   private licenseFeatures: LicenseFeatures = { status: 'missing', keyType: null, expiresAt: null, features: {} };
-  private licenseRenewalTimer?: ReturnType<typeof setTimeout>;
-  private licenseRenewing = false;
-  private licenseRenewalAttempts = 0;
   private plannedRuntimeMutation = 0;
   private runtimeRecoveryFailed = false;
   private activeLivePatchPreload: LivePatchPreloadResult | null = null;
@@ -433,7 +427,6 @@ export class Transport {
     this.safeMode = options.safeMode ?? false;
     this.lightpanda = options.lightpanda;
     this.patchConfig = options.patchConfig ?? {};
-    this.licenseConfig = options.licenseConfig ?? {};
     this.injectionController = new InjectionController(this.logger);
     this.calling = new CallingService({
       sessionId: options.sessionId ?? 'session', logger: this.logger,
@@ -491,7 +484,6 @@ export class Transport {
     this.awaitingRecoveryPairing = true;
     this.runtimeRecoveryFailed = true;
     ++this.latestRuntimeRecoveryRequestId;
-    clearTimeout(this.licenseRenewalTimer);
     this.logger.warn('session_reauthentication_required', { reason });
     this.sessionRecovery = Promise.resolve().then(async () => {
       await this.runtimeRecoveryQueue;
@@ -512,7 +504,6 @@ export class Transport {
     this.runtimeRecoveryEnabled = false;
     this.awaitingRecoveryPairing = true;
     ++this.latestRuntimeRecoveryRequestId;
-    clearTimeout(this.licenseRenewalTimer);
     this.stopQrWatcher();
     await this.portable.preparePairing();
     await this.calling.invalidate();
@@ -1281,387 +1272,100 @@ export class Transport {
     return outcome;
   }
 
+  private communityLicenseArtifact(): LicenseArtifact {
+    return {
+      key: 'community-unlocked',
+      keyType: 'Insiders Program',
+      payload: `(() => {
+        window.__OPENWA_LICENSE__ = {
+          appliedAt: Date.now(),
+          mode: 'unlimited',
+          keyType: 'Insiders Program',
+          maskedKey: 'COMMUNITY-UNLOCKED'
+        };
+        window.KEYTYPE = 'Insiders Program';
+        window.launchError = null;
+        window.__OWA_LICENSE_FEATURES = {
+          patch_calls_control: true,
+          patch_calls_audio: true,
+          patch_calls_video: true,
+          interactive: true
+        };
+        window.__OWA_LICENSE_FEATURE_EXPIRIES = [];
+        return true;
+      })();`,
+      payloadSource: 'server',
+      fetchedAt: Date.now(),
+      expiresAt: null,
+    };
+  }
+
   async preloadLicenseArtifact(options: LicensePreloadOptions): Promise<LicensePreloadResult> {
     const correlationId = 'transport-license-preload';
     const startTime = Date.now();
     const source = options.source ?? 'local';
-
     this.events.emit('launch.license.preload.before', {
-      correlationId,
-      ts: startTime,
-      step: 'license_preload',
-      details: { source },
+      correlationId, ts: startTime, step: 'license_preload', details: { source },
     });
-
-    try {
-      const resolvedKey = await this.resolveLicenseKey(options.licenseKey, options.sessionId);
-
-      // Community Edition: Remove license restrictions and unlock all features by default
-      if (!resolvedKey || (!this.isInvalidLicenseKey(resolvedKey) && !this.isExpiredLicenseKey(resolvedKey))) {
-        const key = resolvedKey ?? 'community-unlocked';
-        const keyType = resolvedKey ? this.deriveLicenseKeyType(resolvedKey) : 'Insiders Program';
-        const payload = `(() => {
-          window.__OPENWA_LICENSE__ = {
-            appliedAt: Date.now(),
-            mode: 'unlimited',
-            keyType: ${JSON.stringify(keyType)},
-            maskedKey: 'COMMUNITY-UNLOCKED'
-          };
-          window.KEYTYPE = ${JSON.stringify(keyType)};
-          window.launchError = null;
-          window.__OWA_LICENSE_FEATURES = {
-            patch_calls_control: true,
-            patch_calls_audio: true,
-            patch_calls_video: true,
-            interactive: true
-          };
-          window.__OWA_LICENSE_FEATURE_EXPIRIES = [];
-          return true;
-        })();`;
-
-        const outcome: LicensePreloadResult = {
-          outcome: 'applied',
-          status: 'valid',
-          source: 'local',
-          artifact: {
-            key,
-            keyType,
-            payload,
-            payloadSource: 'server',
-            fetchedAt: Date.now(),
-            expiresAt: null,
-          },
-          blockingFailure: false,
-          detail: 'All license restrictions removed (Community Edition).',
-        };
-
-        this.events.emit('launch.license.preload.after', {
-          correlationId,
-          ts: Date.now(),
-          step: 'license_preload',
-          durationMs: Date.now() - startTime,
-          details: {
-            success: true,
-            status: outcome.status,
-            source: outcome.source,
-            detail: outcome.detail,
-            blockingFailure: false,
-          },
-        });
-
-        return outcome;
-      }
-
-      const keyType = this.deriveLicenseKeyType(resolvedKey);
-      // Attempt server validation if not in offline mode
-      let payload: string;
-      let payloadSource: 'server' | 'local_metadata';
-
-      if (!this.licenseConfig.offlineLicenseMode && options.sessionInfo?.hostNumber) {
-
-        try {
-          const body = {
-            key: resolvedKey,
-            number: options.sessionInfo.hostNumber,
-            WA_VERSION: options.sessionInfo.WA_VERSION,
-            WA_AUTOMATE_VERSION: options.sessionInfo.WA_AUTOMATE_VERSION,
-            BROWSER_VERSION: options.sessionInfo.BROWSER_VERSION,
-            PAGE_UA: options.sessionInfo.PAGE_UA,
-            OS: options.sessionInfo.OS,
-            NUM_HASH: options.sessionInfo.NUM_HASH,
-          };
-          const serverPayload = await validateLicense(this.licenseConfig.url ?? DEFAULT_LICENSE_CHECK_URL, body);
-
-
-          if (serverPayload === false) {
-            // Server rejected the key
-            const outcome: LicensePreloadResult = {
-              outcome: 'failed',
-              status: 'invalid',
-              source,
-              artifact: null,
-              blockingFailure: true,
-              detail: 'License key was rejected by the validation server.',
-            };
-
-            this.events.emit('launch.license.preload.after', {
-              correlationId,
-              ts: Date.now(),
-              step: 'license_preload',
-              durationMs: Date.now() - startTime,
-              details: {
-                success: false,
-                status: outcome.status,
-                source: outcome.source,
-                detail: outcome.detail,
-                blockingFailure: outcome.blockingFailure,
-              },
-            });
-
-            return outcome;
-          }
-
-          payload = serverPayload;
-          payloadSource = 'server';
-          this.logger.info('license_server_response_downloaded', { maskedKey: this.maskLicenseKey(resolvedKey) });
-        } catch (serverError) {
-          if (options.strict) throw new Error('The license response could not be downloaded.');
-          const serverMsg = serverError instanceof Error ? serverError.message : String(serverError);
-          this.logger.warn('license_server_validation_failed', { error: serverMsg });
-          // Fall back to local metadata injection
-          payload = this.buildLicensePayload(resolvedKey, keyType);
-          payloadSource = 'local_metadata';
-        }
-      } else {
-        if (options.strict) throw new Error('License authorization requires a connected account and the license server.');
-        // Offline mode or no host number yet — use local metadata
-        payload = this.buildLicensePayload(resolvedKey, keyType);
-        payloadSource = 'local_metadata';
-      }
-
-      const artifact: LicenseArtifact = {
-        key: resolvedKey,
-        maskedKey: this.maskLicenseKey(resolvedKey),
-        source,
-        payload,
-        keyType,
-        payloadSource,
-      };
-
-      const outcome: LicensePreloadResult = {
-        outcome: 'ready',
-        status: payloadSource === 'server' ? 'valid' : 'metadata_only',
-        source,
-        artifact,
-        blockingFailure: false,
-        detail: payloadSource === 'server'
-          ? 'License response downloaded; its code must run to confirm access.'
-          : 'License metadata fallback was prepared without server confirmation.',
-      };
-
-
-      this.events.emit('launch.license.preload.after', {
-        correlationId,
-        ts: Date.now(),
-        step: 'license_preload',
-        durationMs: Date.now() - startTime,
-        details: {
-          success: true,
-          status: outcome.status,
-          source: outcome.source,
-          payloadSource: artifact.payloadSource,
-          detail: outcome.detail,
-          blockingFailure: outcome.blockingFailure,
-        },
-      });
-
-      return outcome;
-    } catch (error) {
-      const normalizedError = error instanceof Error ? error : new Error(String(error));
-      const outcome: LicensePreloadResult = {
-        outcome: 'failed',
-        status: 'invalid',
-        source,
-        artifact: null,
-        blockingFailure: true,
-        detail: normalizedError.message,
-        error: normalizedError,
-      };
-
-      this.events.emit('launch.license.preload.after', {
-        correlationId,
-        ts: Date.now(),
-        step: 'license_preload',
-        durationMs: Date.now() - startTime,
-        error: {
-          name: normalizedError.name,
-          message: normalizedError.message,
-          stack: normalizedError.stack,
-        },
-        details: {
-          success: false,
-          status: outcome.status,
-          source: outcome.source,
-          detail: outcome.detail,
-          blockingFailure: outcome.blockingFailure,
-        },
-      });
-
-      return outcome;
-    }
+    const outcome: LicensePreloadResult = {
+      outcome: 'applied',
+      status: 'valid',
+      source: 'local',
+      artifact: this.communityLicenseArtifact(),
+      blockingFailure: false,
+      detail: 'Community runtime features are available without licence validation.',
+    };
+    this.events.emit('launch.license.preload.after', {
+      correlationId,
+      ts: Date.now(),
+      step: 'license_preload',
+      durationMs: Date.now() - startTime,
+      details: { success: true, status: outcome.status, source: outcome.source, blockingFailure: false },
+    });
+    return outcome;
   }
 
-  async checkLicenseArtifact(preloaded: LicensePreloadResult): Promise<LicenseCheckResult> {
+  async checkLicenseArtifact(_preloaded: LicensePreloadResult): Promise<LicenseCheckResult> {
     const correlationId = 'transport-license-check';
     const startTime = Date.now();
-    const source = preloaded.source === 'none' ? 'local' : preloaded.source;
-
+    const source = 'local';
     this.events.emit('launch.license.check.before', {
-      correlationId,
-      ts: startTime,
-      step: 'license_check',
-      details: { source },
+      correlationId, ts: startTime, step: 'license_check', details: { source },
     });
-
     this.events.emit('license.check.before', {
-      correlationId,
-      ts: startTime,
-      step: 'license_check',
-      details: { source },
+      correlationId, ts: startTime, step: 'license_check', details: { source },
     });
-
-    let result: LicenseCheckResult;
-
-    if (preloaded.outcome === 'failed') {
-      result = {
-        status: 'invalid',
-        source,
-        artifact: null,
-        blockingFailure: true,
-        detail: preloaded.detail ?? preloaded.error?.message ?? 'License preload failed before validation.',
-      };
-    } else if (!preloaded.artifact) {
-      result = {
-        status: 'valid',
-        source,
-        artifact: {
-          key: 'community-unlocked',
-          keyType: 'Insiders Program',
-          payload: `(() => {
-            window.__OPENWA_LICENSE__ = { appliedAt: Date.now(), mode: 'unlimited', keyType: 'Insiders Program', maskedKey: 'COMMUNITY-UNLOCKED' };
-            window.KEYTYPE = 'Insiders Program';
-            window.launchError = null;
-            window.__OWA_LICENSE_FEATURES = { patch_calls_control: true, patch_calls_audio: true, patch_calls_video: true, interactive: true };
-            window.__OWA_LICENSE_FEATURE_EXPIRIES = [];
-            return true;
-          })();`,
-          payloadSource: 'server',
-          fetchedAt: Date.now(),
-          expiresAt: null,
-        },
-        blockingFailure: false,
-        detail: 'All license restrictions removed (Community Edition).',
-      };
-    } else if (this.isExpiredLicenseKey(preloaded.artifact.key)) {
-      result = {
-        status: 'expired',
-        source,
-        artifact: null,
-        blockingFailure: true,
-        detail: 'Resolved license key is marked as expired.',
-      };
-    } else if (this.isInvalidLicenseKey(preloaded.artifact.key)) {
-      result = {
-        status: 'invalid',
-        source,
-        artifact: null,
-        blockingFailure: true,
-        detail: 'Resolved license key is marked as invalid.',
-      };
-    } else {
-      result = {
-        status: 'valid',
-        source,
-        artifact: preloaded.artifact,
-        blockingFailure: false,
-        detail: 'License capability unlocked (Community Edition).',
-      };
-    }
-
-    const finishedAt = Date.now();
-    const details = {
-      status: result.status,
-      detail: result.detail,
-      source: result.source,
-      payloadSource: result.artifact?.payloadSource,
-      blockingFailure: result.blockingFailure,
+    const result: LicenseCheckResult = {
+      status: 'valid',
+      source,
+      artifact: this.communityLicenseArtifact(),
+      blockingFailure: false,
+      detail: 'Community runtime features are available without licence validation.',
     };
-
+    const details = { status: result.status, detail: result.detail, source, blockingFailure: false };
     this.events.emit('launch.license.check.after', {
-      correlationId,
-      ts: finishedAt,
-      step: 'license_check',
-      durationMs: finishedAt - startTime,
-      details,
+      correlationId, ts: Date.now(), step: 'license_check',
+      durationMs: Date.now() - startTime, details,
     });
-
     this.events.emit('license.check.after', {
-      correlationId,
-      ts: finishedAt,
-      step: 'license_check',
-      durationMs: finishedAt - startTime,
-      details,
+      correlationId, ts: Date.now(), step: 'license_check',
+      durationMs: Date.now() - startTime, details,
     });
-
     return result;
   }
 
-  private scheduleLicenseRenewal(): void {
-    clearTimeout(this.licenseRenewalTimer);
-    const expiry = this.licenseFeatures.expiresAt ?? this.calling.licenseExpiresAt;
-    if (!this.page || this.page.isClosed() || !expiry || this.retainedLicenseArtifact?.payloadSource !== 'server') return;
-    this.licenseRenewalTimer = setTimeout(() => { void this.refreshLicenseFeatures(); }, Math.max(1000, expiry - Date.now() - 30_000));
-    this.licenseRenewalTimer.unref?.();
-  }
+  private scheduleLicenseRenewal(): void { /* Community features do not expire. */ }
 
-  private async refreshLicenseFeatures(): Promise<void> {
-    if (this.plannedRuntimeMutation || this.runtimeRecoveryFailed) return;
-    await this.renewLicenseFeatures();
-  }
-
-  private async renewLicenseFeatures(): Promise<void> {
-    if (this.plannedRuntimeMutation) return;
-    if (this.licenseRenewing || !this.retainedLicenseArtifact || !this.page || this.page.isClosed()) return;
-    this.licenseRenewing = true;
-    try {
-      const existing = this.retainedLicenseArtifact;
-      const documentId = this.getDocumentGeneration().documentId;
-      const refreshed = await this.preloadLicenseArtifact({ sessionId: this.options.sessionId ?? 'session', licenseKey: existing.key, sessionInfo: await this.getSessionDebugInfo() });
-      if (this.plannedRuntimeMutation || this.retainedLicenseArtifact !== existing || this.getDocumentGeneration().documentId !== documentId) return;
-      const artifact = refreshed.artifact;
-      if (refreshed.status === 'invalid' || refreshed.status === 'expired') {
-        this.licenseFeatures = { ...this.licenseFeatures, status: refreshed.status, expiresAt: null };
-        this.retainedLicenseArtifact = undefined;
-        await this.calling.revoke();
-        this.logger.warn('Licensed feature access was withdrawn. Messaging remains available.');
-        return;
-      }
-      if (!artifact || artifact.payloadSource !== 'server') { this.logger.warn('Licence refresh is unavailable. Current feature access remains bounded by its expiry.'); return; }
-      const checked = await this.checkLicenseArtifact(refreshed);
-      if (this.plannedRuntimeMutation || this.retainedLicenseArtifact !== existing || this.getDocumentGeneration().documentId !== documentId) return;
-      const applied = await this.applyLicenseArtifact(checked);
-      if (applied.applied && applied.status === 'valid') this.licenseRenewalAttempts = 0;
-      else {
-        await this.calling.revoke();
-        void this.refreshHandler?.().catch(() => undefined);
-      }
-    } catch { this.logger.warn('Licence renewal is unavailable. Existing feature access remains bounded by its expiry.'); }
-    finally {
-      this.licenseRenewing = false;
-      const remaining = this.retainedLicenseArtifact ? (this.licenseFeatures.expiresAt ?? this.calling.licenseExpiresAt ?? 0) - Date.now() : 0;
-      if (remaining > 1000 && remaining < 30_000 && this.licenseRenewalAttempts < 3) {
-        clearTimeout(this.licenseRenewalTimer);
-        const delay = Math.min(remaining - 500, 1000 * 2 ** this.licenseRenewalAttempts++);
-        this.licenseRenewalTimer = setTimeout(() => { void this.refreshLicenseFeatures(); }, delay);
-        this.licenseRenewalTimer.unref?.();
-      }
-    }
-  }
-
-  async applyLicenseArtifact(checked: LicenseCheckResult): Promise<LicenseApplyResult> {
+  async applyLicenseArtifact(_checked: LicenseCheckResult): Promise<LicenseApplyResult> {
     if (!this.page) {
       throw new Error('Transport not initialized');
     }
-
-    if ((checked.status !== 'valid' && checked.status !== 'metadata_only') || !checked.artifact) {
-      this.licenseFeatures = { status: checked.status, keyType: null, expiresAt: null, features: {} };
-      return {
-        status: checked.status,
-        applied: false,
-        blockingFailure: checked.blockingFailure,
-        detail: checked.detail,
-      };
-    }
+    const checked = {
+      status: 'valid',
+      source: 'local',
+      artifact: this.communityLicenseArtifact(),
+      blockingFailure: false,
+    } satisfies LicenseCheckResult;
 
     const correlationId = 'transport-license-apply';
     const startTime = Date.now();
@@ -1679,8 +1383,6 @@ export class Transport {
     let result: LicenseApplyResult;
 
     try {
-      // A fresh accepted payload supplies the entire selection, including all
-      // keys in a multi-key response. Never retain a removed feature on refresh.
       await this.page.evaluateScript('window.__OWA_LICENSE_FEATURES={};window.__OWA_LICENSE_FEATURE_EXPIRIES=[];');
       const applied = await this.page.evaluateScript<boolean>(checked.artifact.payload);
       const launchError = await this.page.evaluateScript<string | null>('window.launchError || null');
@@ -1689,15 +1391,6 @@ export class Transport {
         this.retainedLicenseArtifact = checked.artifact;
         if (!this.plannedRuntimeMutation) this.effectiveLicenseKey = checked.artifact.key;
         this.licenseFeatures = { status: 'valid', keyType: detectedKeyType || checked.artifact.keyType || null, features: {}, expiresAt: null };
-        try {
-          const raw = await this.page.evaluateScript<unknown>('({features:window.__OWA_LICENSE_FEATURES,expiries:window.__OWA_LICENSE_FEATURE_EXPIRIES})');
-          if (raw && typeof raw === 'object' && 'features' in raw && 'expiries' in raw) {
-            const features = raw.features && typeof raw.features === 'object' && !Array.isArray(raw.features)
-              ? Object.fromEntries(Object.entries(raw.features).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean')) : {};
-            const expiries = Array.isArray(raw.expiries) ? raw.expiries.filter((value): value is number => typeof value === 'number' && Number.isFinite(value)) : [];
-            this.licenseFeatures = { ...this.licenseFeatures, features: expiries.length ? features : {}, expiresAt: expiries.length ? Math.min(...expiries) : null };
-          }
-        } catch (error) { this.logger.warn('Licence feature list is unavailable', { message: String(error) }); }
         await this.calling.install().catch(error => {
           this.logger.warn('Calling initialization is unavailable', { message: String(error) });
         });
@@ -1717,9 +1410,7 @@ export class Transport {
           applied: true,
           blockingFailure: false,
           keyType: detectedKeyType || checked.artifact.keyType,
-          detail: checked.status === 'valid'
-            ? 'License capability was unlocked using a server-confirmed payload.'
-            : 'Metadata-only license fallback injected session metadata without server-confirmed unlock.',
+          detail: 'Community runtime features are available.',
         };
       }
 
@@ -1764,7 +1455,6 @@ export class Transport {
         patch_calls_audio: true,
         patch_calls_video: true,
         interactive: true,
-        ...(this.licenseFeatures.features || {}),
       },
     };
   }
@@ -2184,7 +1874,6 @@ export class Transport {
   async runPlannedRuntimeMutation<T>(operation: () => Promise<T>): Promise<T> {
     this.plannedRuntimeMutation++;
     ++this.latestRuntimeRecoveryRequestId;
-    clearTimeout(this.licenseRenewalTimer);
     try {
       await this.runtimeRecoveryQueue;
       await this.injectionController.waitForIdle();
@@ -2260,7 +1949,6 @@ export class Transport {
     this.closed = true;
     this.runtimeRecoveryEnabled = false;
     ++this.latestRuntimeRecoveryRequestId;
-    clearTimeout(this.licenseRenewalTimer);
     await this.calling.close();
     this.licenseFeatures = { status: 'missing', keyType: null, expiresAt: null, features: {} };
     this.stopQrWatcher();
@@ -2665,7 +2353,6 @@ export class Transport {
   private async recoverDocument(request: Parameters<Transport['runRuntimeRecovery']>[0]): Promise<void> {
     // Own callbacks during recovery itself without waiting on our own queue.
     this.plannedRuntimeMutation++;
-    clearTimeout(this.licenseRenewalTimer);
     try {
       await this.runRuntimeRecovery(request);
     }
@@ -2950,74 +2637,6 @@ export class Transport {
     } catch {
       return false;
     }
-  }
-
-  private async resolveLicenseKey(
-    input: LicenseKeyResolver | undefined,
-    sessionId: string,
-  ): Promise<string | null> {
-    if (!input) {
-      return null;
-    }
-
-    let resolved: string | Record<string, string | undefined> | null | undefined;
-    if (typeof input === 'function') {
-      resolved = await input(sessionId);
-    } else {
-      resolved = input;
-    }
-
-    if (typeof resolved === 'object' && resolved !== null) {
-      resolved = resolved[sessionId] ?? null;
-    }
-
-    if (typeof resolved !== 'string') {
-      return null;
-    }
-
-    const trimmed = resolved.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  }
-
-  private deriveLicenseKeyType(key: string): string {
-    const normalizedKey = key.trim();
-    const [head] = normalizedKey.split(/[-:]/);
-    return /^(insiders|restricted)$/i.test(head ?? '')
-      ? head.toLowerCase()
-      : 'license';
-  }
-
-  private maskLicenseKey(key: string): string {
-    if (key.length <= 4) {
-      return '****';
-    }
-
-    return `${'*'.repeat(Math.max(0, key.length - 4))}${key.slice(-4)}`;
-  }
-
-  private isInvalidLicenseKey(key: string): boolean {
-    return /^invalid[-:]/i.test(key.trim());
-  }
-
-  private isExpiredLicenseKey(key: string): boolean {
-    return /^expired[-:]/i.test(key.trim());
-  }
-
-  private buildLicensePayload(key: string, keyType: string): string {
-    const safeKeyType = JSON.stringify(keyType);
-    const safeMaskedKey = JSON.stringify(this.maskLicenseKey(key));
-
-    return `(() => {
-      window.__OPENWA_LICENSE__ = {
-        appliedAt: Date.now(),
-        mode: 'metadata_injection',
-        keyType: ${safeKeyType},
-        maskedKey: ${safeMaskedKey}
-      };
-      window.KEYTYPE = ${safeKeyType};
-      window.launchError = null;
-      return true;
-    })();`;
   }
 
   // ─── Live Patch Pipeline ────────────────────────────────────────────────

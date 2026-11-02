@@ -108,10 +108,7 @@ export interface CreateClientOptions extends SessionPersistenceConfig, SessionEn
    */
   patchConfig?: PatchFetchConfig;
 
-  /**
-   * Configuration for remote license validation via funcs.openwa.dev.
-   * Controls offline mode.
-   */
+  /** @deprecated Retained for configuration compatibility; community mode ignores it. */
   licenseConfig?: LicenseServerConfig;
 
   /** Optional process-wide admission policy used to cap browser-session RAM. */
