@@ -1,146 +1,149 @@
 ---
 title: Easy API quick start
-description: Start the open-wa Easy API, add an API key, verify the docs URL, and know the next command to run.
+description: Run open-wa's HTTP API, pair WhatsApp, and send requests from cURL, JavaScript, or Python.
 ---
 
 # Easy API quick start
 
-Use this page when you want a local WhatsApp API running before you write custom Node.js code.
+Use Easy API to control WhatsApp from an HTTP client and manage the session in Neo. Use Node.js 22.21.1 or newer and npm.
 
-## Run it
+## Start and pair the session
 
-```bash
-npx @open-wa/wa-automate --port 8080
-```
-
-That starts an Easy API instance on port `8080` and prints the local address for the API and the interactive docs.
-
-These examples pin port `8080` for consistency. If you omit `--port`, the current v5 CLI uses port `8002`.
-
-## Expected terminal output
-
-Exact log lines vary by version and browser driver, but you should see the runtime start, then print the local API address and docs URL.
-
-```text
-Easy API listening on http://localhost:8080
-Interactive docs: http://localhost:8080/api-docs/
-```
-
-Open the docs URL after the session is connected. If you changed the port, replace `8080` with your chosen port.
-
-## What you get
-
-When the runtime is healthy you usually have three things:
-
-- the session bootstrap flow (QR or link-code authentication)
-- the HTTP API surface
-- the generated interactive docs for that running session
-
-That makes Easy API the shortest route from “I want an API” to “I can send and receive messages”.
-
-## Common flags
+Create your project, choosing JavaScript or TypeScript, a browser, and optional plugins:
 
 ```bash
-# choose a port
-npx @open-wa/wa-automate --port 8080
-
-# protect the API with your own key
-npx @open-wa/wa-automate --port 8080 --api-key "your-secure-key"
-
-# run a named session
-npx @open-wa/wa-automate --session-id sales --port 8081
+npm init @open-wa@latest my-api -- --mode easy-api
+cd my-api
 ```
 
-## API-key examples
+Use the [visual builder](/new?mode=easy-api) to preview the same choices and
+files. Easy API discovers the generated `wa.config.js` or `wa.config.ts` file
+automatically. If you selected integrations, copy `.env.example` to `.env` and
+fill in their settings.
 
-Use `--api-key "your-secure-key"` when you want a stable key that your apps, scripts, or teammates can reuse. The current CLI reads the value after `--api-key`, `--key`, or `-k`; a bare `--api-key` does not generate a key.
+Set an API key and start the server:
+
+```bash title="Terminal"
+export OPENWA_API_URL='http://127.0.0.1:8080'
+export WA_API_KEY='REPLACE_WITH_YOUR_API_KEY'
+npm start
+```
+
+On the phone, open **WhatsApp → Linked devices → Link a device** and scan the QR code. Open `/dashboard/` on the printed server address to manage the session. Use `/api-docs/` for the API explorer.
+
+The server can answer HTTP requests before WhatsApp is ready. Read `/health` and check `connected` and `session.ready` before sending:
 
 ```bash
-npx @open-wa/wa-automate --port 8080 --api-key "your-secure-key"
+curl --fail-with-body "$OPENWA_API_URL/health"
 ```
 
-When calling the API, send the same key with your request headers.
+Restart from the same project directory with the same session ID to reuse a
+valid saved login. Treat session data as private authentication material. Use a
+different session ID and port for another account.
 
-```bash
-curl http://localhost:8080/api-docs/ \
-  -H "X-API-Key: your-secure-key"
+## Send a message
+
+Use a chat ID from a conversation already available to the linked account. Starting a new chat requires an applied restricted or premium license. Replace the example destination before sending.
+
+The examples use the same URL and key variables as the startup command. Run them in another terminal with those variables set. JavaScript uses Node.js and its built-in `fetch`. For Python, install `requests` with `python -m pip install requests`.
+
+```bash tab="cURL" tab-group="openwa-http-language" title="HTTP request"
+curl --fail-with-body "$OPENWA_API_URL/api/messages/sendText" \
+  -H "X-API-Key: $WA_API_KEY" \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "to": "447700900123@c.us",
+    "content": "Hello from Easy API",
+    "options": {}
+  }'
 ```
 
-## Good defaults for a first session
-
-- Set a **session id** early if you plan to run more than one account.
-- Protect the API with an **API key** before exposing it anywhere outside your machine.
-- Treat the Easy API as a **runtime surface**, then move business logic into your own app or worker processes.
-
-## Session persistence
-
-Easy API stores the browser profile for a session on disk so a restart can reuse the same authenticated WhatsApp Web session.
-
-By default, the profile directory is derived from the session id. For `--session-id sales`, the local profile directory is `./_IGNORE_sales`. If you do not set a session id, the default session uses `./_IGNORE_session`.
-
-To keep the session across restarts, start the process from the same working directory and reuse the same `--session-id`. To back it up, stop the process first, then copy the matching `_IGNORE_*` directory to safe storage. Restore that directory before starting the runtime again.
-
-## Authentication paths
-
-- If you are doing an ordinary first login, scan the QR code the runtime emits.
-- If you already know the host account number and want to avoid QR scanning, use **[Link-code login](/docs/getting-started/link-code)**.
-
-If you want the fastest path to first success, follow the **[Quick Start](/docs/getting-started/quickstart)** guide.
-
-## Deployment notes
-
-- Use `--host` or `-h` to choose the local bind host.
-- Use `--session-id` plus distinct ports when you run multiple sessions on one host.
-- Put restart policy around the process early; do not wait until you have a flaky production incident.
-
-## Production warning
-
-<Callout type="warning">
-Easy API is convenient, but do not expose it to the public internet without a clear security boundary. Use an API key, restrict network access, prefer HTTPS behind a trusted proxy, protect session profile data, and avoid sharing interactive docs with untrusted users.
-</Callout>
-
-## Tunneling and remote access
-
-The current v5 CLI only warns when `--tunnel` is provided; it does not restore tunnel setup parity. For controlled remote access, use **[Cloudflare Session Proxy](/docs/client-and-integrations/cf-proxy)** instead.
-
-## Webhooks
-
-The current CLI parses `--webhook` into config, but startup warns that v5 CLI webhook registration parity is not restored. For source-backed webhook delivery in the current v5 alpha, load `@open-wa/integration-webhook` from `wa.config.*` through the plugin config section below.
-
-## Load a plugin from config
-
-Load plugins from the config file through the `plugins` array. Put plugin-specific settings in `pluginConfig`.
-
-```ts
-plugins: [
-  '@open-wa/integration-webhook',
-  './my-local-plugin'
-],
-pluginConfig: {
-  webhook: {
-    // plugin-specific config
-  }
-}
+```js tab="JavaScript" title="Node.js fetch"
+const response = await fetch(
+  `${process.env.OPENWA_API_URL}/api/messages/sendText`,
+  {
+    method: 'POST',
+    headers: {
+      'X-API-Key': process.env.WA_API_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      to: '447700900123@c.us',
+      content: 'Hello from Easy API',
+      options: {},
+    }),
+  },
+);
+if (!response.ok) throw new Error(await response.text());
+const { data: messageId } = await response.json();
+console.log(messageId);
 ```
 
-## Process management
+```python tab="Python" title="Python · requests"
+import os
+import requests
 
-If you want automatic restarts and supervised uptime, run under a process manager.
-
-```bash
-npx @open-wa/wa-automate --pm2 --session-id STICKER-BOT --port 8080
+response = requests.post(
+    os.environ["OPENWA_API_URL"].rstrip("/") + "/api/messages/sendText",
+    headers={"X-API-Key": os.environ["WA_API_KEY"]},
+    json={
+        "to": "447700900123@c.us",
+        "content": "Hello from Easy API",
+        "options": {},
+    },
+    timeout=30,
+)
+response.raise_for_status()
+print(response.json()["data"])
 ```
 
-PM2 is useful when you need process restarts, basic memory controls, and a named process per session.
+Method routes return `{ "success": true, "data": ... }`. For `sendText`, `data` is the submitted message ID. It does not confirm delivery or reading. An HTTP failure returns an error response. Inspect the conversation before repeating a request whose outcome is unknown.
 
-## When to graduate from this page
+## Receive events
 
-- Move to **[Custom code](/docs/getting-started/custom-code)** if you want direct client control.
-- Move to **[Socket Client](/docs/client-and-integrations/socket-client)** if your app needs to consume a remote Easy API instance.
-- Move to **[Multiple sessions](/docs/guides/multiple-sessions)** if one runtime is no longer enough.
+Open the Server-Sent Events stream before sending messages:
 
-## Related guides
+```bash title="Incoming messages and acknowledgements"
+curl --no-buffer --fail-with-body \
+  "$OPENWA_API_URL/api/events?topics=message.received,ack.changed" \
+  -H "X-API-Key: $WA_API_KEY"
+```
 
-- **[CLI options](/docs/guides/configuration-and-cli)**
-- **[Multiple sessions](/docs/guides/multiple-sessions)**
-- **[Socket Client](/docs/client-and-integrations/socket-client)**
+Each `data:` line contains a JSON envelope with `id`, `event`, `payload`, `ts`, and `sessionId`. Incoming messages are at `payload.message`; ACK snapshots are at `payload.ack`. Close the connection to stop listening. Reconnect after a disconnect; this stream does not replay missed events.
+
+For a Node.js application, [SocketClient](/docs/client-and-integrations/socket-client) provides SDK-style methods and listeners over the remote API. For HTTP webhooks, configure the integration plugin in a config file:
+
+```js title="wa.config.js"
+export default {
+  host: '127.0.0.1',
+  port: 8080,
+  apiKey: process.env.WA_API_KEY,
+  plugins: ['@open-wa/integration-webhook'],
+  pluginConfig: {
+    webhook: {
+      url: 'https://your-app.example/webhooks/open-wa',
+      events: ['message.received'],
+      headers: {
+        'X-Webhook-Secret': process.env.OPEN_WA_WEBHOOK_SECRET,
+      },
+    },
+  },
+};
+```
+
+Run `npm start` to load the updated config. See [webhook payloads](/docs/client-and-integrations/webhook-payloads) for event bodies and delivery behavior.
+
+## Use media, events, and calls
+
+- [Media](/docs/guides/media) explains images, videos, voice notes, view-once options, and albums.
+- [Events and RSVPs](/docs/guides/whatsapp-events) explains native event cards and attendance responses.
+- [Calls](/docs/guides/calls) explains the licensed audio preview, files, streams, and the Calls dashboard.
+- [Session refresh](/docs/operations/session-refresh) explains patch and license operations without restarting the API host.
+
+For direct HTTP media requests, file paths belong to the Easy API host. Use an accessible URL or complete data URL to supply an attachment from another machine. SDK methods and Web streams cannot be serialized into JSON; use the wire fields listed in `/api-docs/`.
+
+## Remote access
+
+Send `X-API-Key` on protected API requests. Keep the key on your application server and use HTTPS for remote access. `/health` is public and can contain pairing or diagnostic data, so keep the server on a private address and exclude it from a public proxy.
+
+Use [Cloudflare Session Proxy](/docs/client-and-integrations/cf-proxy) for remote consumers, [Docker](/docs/getting-started/docker) for a container setup, or [custom code](/docs/getting-started/custom-code) to own the browser directly.

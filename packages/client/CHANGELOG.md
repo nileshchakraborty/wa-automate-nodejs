@@ -1,5 +1,257 @@
 # @open-wa/client
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## 5.10.0
+<sub>2026-10-28</sub>
+
+-  *(minor)*
+  Add the official Voxtral assistant for conversational WhatsApp voice notes and
+  live audio calls, with a plugin-provided Neo dashboard page, saved settings,
+  voice preview, conversation context, and shared call controls.
+
+  Show transcripts, assistant status, and per-chat controls in Neo's normal Chat
+  feed through plugin-provided chat components.
+
+  Load configured plugins in Easy API and expose host-side media/calling services
+  to plugins. Plugin pages can supply native page modules and request host route
+  authentication.
+-  *(patch)*
+  Validate and normalize booking timestamps with a shared branded Effect codec so Android displays the appointment date and time alongside its location. Preserve Effect decoding, encoding and schema metadata in the serving projection, and describe request inputs separately from normalized outputs in the API reference. Reject invalid dates and ranges that collapse at whole-second precision before sending.
+
+## 5.9.7
+<sub>2026-10-24</sub>
+
+- *(patch)* Version bump from group with `@open-wa/api` v5.9.7, `@open-wa/socket-client` v5.9.7
+
+## 5.9.6
+<sub>2026-10-24</sub>
+
+- *(patch)* Version bump from group with `@open-wa/api` v5.9.6, `@open-wa/core` v5.9.6, `@open-wa/integration-voxtral` v5.9.6
+
+## 5.9.5
+<sub>2026-10-24</sub>
+
+- *(patch)* Version bump from group with `@open-wa/core` v5.9.5
+
+## 5.9.4
+<sub>2026-10-24</sub>
+
+- *(patch)* Version bump from group with `@open-wa/api` v5.9.4, `@open-wa/core` v5.9.4, `@open-wa/driver-puppeteer` v5.9.4, `@open-wa/integration-voxtral` v5.9.4
+
+## 5.9.3
+<sub>2026-10-24</sub>
+
+- *(patch)* Version bump from group with `@open-wa/core` v5.9.3
+
+## 5.9.2
+<sub>2026-10-24</sub>
+
+- *(patch)* Version bump from group with `@open-wa/core` v5.9.2, `@open-wa/decrypt` v5.9.2, `@open-wa/integration-voxtral` v5.9.2
+
+## 5.9.1
+<sub>2026-10-24</sub>
+
+- *(patch)* Version bump from group with `@open-wa/integration-voxtral` v5.9.1
+
+## 5.9.0
+<sub>2026-10-24</sub>
+
+- *(minor)* Version bump from group with `@open-wa/config` v5.9.0, `@open-wa/create` v5.9.0, `@open-wa/wa-automate` v5.9.0
+
+## 5.8.0
+<sub>2026-10-23</sub>
+
+- *(minor)* Version bump from group with `@open-wa/core` v5.8.0
+
+## 5.7.0
+<sub>2026-10-23</sub>
+
+-  *(minor)*
+  Add the official Voxtral assistant for conversational WhatsApp voice notes and
+  live audio calls, with a plugin-provided Neo dashboard page, saved settings,
+  voice preview, conversation context, and shared call controls.
+
+  Show transcripts, assistant status, and per-chat controls in Neo's normal Chat
+  feed through plugin-provided chat components.
+
+  Load configured plugins in Easy API and expose host-side media/calling services
+  to plugins. Plugin pages can supply native page modules and request host route
+  authentication.
+
+## 5.6.7
+<sub>2026-10-22</sub>
+
+- *(patch)* Version bump from group with `@open-wa/core` v5.6.7
+
+## 5.6.6
+<sub>2026-10-16</sub>
+
+- *(patch)* Version bump from group with `@open-wa/hyperemitter` v5.6.6
+
+## 5.6.5
+<sub>2026-10-16</sub>
+
+- *(patch)* Version bump from group with `@open-wa/core` v5.6.5
+
+## 5.6.4
+<sub>2026-10-16</sub>
+
+- *(patch)* Version bump from group with `@open-wa/api` v5.6.4, `@open-wa/stickers` v5.6.4
+
+## 5.6.3
+<sub>2026-10-16</sub>
+
+- *(patch)* Version bump from group with `@open-wa/stickers` v5.6.3
+
+## 5.6.2
+<sub>2026-10-15</sub>
+
+- [#3552](https://github.com/open-wa/wa-automate-nodejs/pull/3552)  *(patch)*
+  - 🐛 Recover invalid, undecryptable, or logged-out sessions through fresh QR pairing in the same process, retaining the client and its message listeners and replacing the unusable checkpoint after pairing.
+  - 🐛 Recover corrupt session files and credential paths automatically, replacing unusable data after fresh pairing.
+  - 🐛 Handle logout-cleanup failures without an unhandled rejection and rerun client finalization after pairing.
+- [#3552](https://github.com/open-wa/wa-automate-nodejs/pull/3552)  *(patch)*
+  - 🐛 Restore authentication based on WhatsApp's QR and chat-list screens, keep the existing QR page during logout recovery, and remove startup validation, repair, unread-audit and readiness blockers.
+  - 🐛 Deliver incoming messages through ordinary WAPI events and save encrypted sessions in the background. Remove native message-write and delivery-receipt interception and the custom callback acknowledgement/replay API.
+
+## 5.6.1
+<sub>2026-10-14</sub>
+
+- *(patch)* Version bump from group with `@open-wa/core` v5.6.1
+
+## 5.6.0
+<sub>2026-10-14</sub>
+
+- *(minor)* Version bump from group with `@open-wa/api` v5.6.0, `@open-wa/config` v5.6.0, `@open-wa/core` v5.6.0, `@open-wa/hyperemitter` v5.6.0, `@open-wa/mcp` v5.6.0, `@open-wa/schema` v5.6.0, `@open-wa/socket-client` v5.6.0
+
+## 5.5.1
+<sub>2026-10-12</sub>
+
+- *(patch)* Version bump from group with `@open-wa/core` v5.5.1
+
+## 5.5.0
+<sub>2026-10-12</sub>
+
+- [#3521](https://github.com/open-wa/wa-automate-nodejs/pull/3521)  *(minor)*
+  - ✨ Add native album sending for images, videos and MP4 GIFs, with one caption, PN-to-LID resolution and explicit partial-send errors.
+  - 🐛 Accept album message events, expose declared media counts and parent associations, and add `getAlbumMessages` to retrieve loaded child media.
+- [#3503](https://github.com/open-wa/wa-automate-nodejs/pull/3503)  *(minor)*
+  - ✨ Add the public licensed-calling audio preview: bound Call controls, file and stream audio, recordings, remote media helpers and the Calls dashboard.
+  - 🔒️ Calling uses the existing licensed patch delivery; expected availability failures log an actionable reason without stopping messaging.
+  - ♻️ Own call media in scoped resources and finalize recordings on observed call end, media failure, disconnect and browser recovery.
+- [#3520](https://github.com/open-wa/wa-automate-nodejs/pull/3520)  *(minor)*
+  - Add live session patch refresh and dashboard license activation through a shared page replacement coordinator, retaining the browser process and host session.
+  - Preserve portable persistence ownership and report refresh progress; WhatsApp reloads without pausing or draining application operations.
+  - Evaluate the existing license response during refresh and report rejected keys without blocking public functionality.
+- [#3520](https://github.com/open-wa/wa-automate-nodejs/pull/3520)  *(minor)*
+  Add a lazy local sticker package and CLI with automatic whole-job backend selection,
+  ordered shared recipes, bounded executors and typed sticker sending through the
+  private donor finalizer.
+- [#3518](https://github.com/open-wa/wa-automate-nodejs/pull/3518)  *(minor)*
+  - 🐛 Restore patch-backed file, URL media, reaction and message-edit sending instead of rejecting them as unsupported.
+  - ✨ Expose audio, voice-note, looping video, poll, vCard, multi-contact and licensed status-posting methods on Client.
+  - 🐛 Preserve media MIME types and align poll selection limits and contact return schemas with the runtime.
+- [#3518](https://github.com/open-wa/wa-automate-nodejs/pull/3518)  *(minor)*
+  Add typed media options for view-once attachments, circular video notes, GIFs and documents. Media captions and quoted message IDs now belong in the options object. Add poll closing times, hidden voter names, voting, synced results and vote listeners, plus message pinning and unpinning.
+
+  Add voluntary phone-number request and share-own-number methods, plus native call-link generation and scheduled-call options on events. Fix native attachment construction, prepared video dimensions, submitted IDs and native media failure reporting discovered during live phone demos.
+- [#3518](https://github.com/open-wa/wa-automate-nodejs/pull/3518)  *(minor)*
+  - ✨ Add native WhatsApp event creation, history, editing, cancellation and RSVPs.
+  - ✨ Expose event and decrypted RSVP listeners with Effect schemas and JSON serializers.
+  - ✨ Deliver event support through the common live patch without a licence requirement.
+  - 📝 Add event and RSVP usage, Easy API routes, generated types and serializer documentation. Event times use Unix seconds; RSVP timestamps use milliseconds.
+- [#3521](https://github.com/open-wa/wa-automate-nodejs/pull/3521)  *(patch)*
+  - 🐛 Restore complete available message snapshots in `onAck` instead of reducing acknowledgements to an ID and status.
+  - 🐛 Restore the shared `ev` helper, v4 wildcard subscriptions, and supported session/listener event aliases, with Effect-owned session cleanup and optional scoped subscriptions.
+  - 🐛 Return contacts from `getGroupMembers` and restore `getGroupMembersId` for ID-only lookups, resolving contacts in one browser round trip.
+- [#3519](https://github.com/open-wa/wa-automate-nodejs/pull/3519)  *(patch)*
+  Restore schema-bound client methods for file sending, editing, reactions, group
+  information, titles and descriptions through the existing private patch pipeline.
+  Restore per-group and global participant listeners through the schema event bridge,
+  including shared ev aliases, and correct the migration guide's unsupported claims.
+
+## 5.4.0
+<sub>2026-09-30</sub>
+
+- [#3477](https://github.com/open-wa/wa-automate-nodejs/pull/3477)  *(minor)*
+  - 🔒️ Bring your own session encryption key through config, environment variables or a mounted Docker secret. Omit it to use the baked default.
+  - 🚚 Compact auth is the only path: `legacyDataDirAuth` is removed. Moving from a browser profile or changing keys requires a fresh QR scan.
+
+## 5.3.0
+
+- 📨 Replay pending incoming messages through `onMessage`; acknowledge after handlers complete and the checkpoint is saved. Retries are at least once.
+
+## 5.2.0
+<sub>2026-09-29</sub>
+
+- [#3465](https://github.com/open-wa/wa-automate-nodejs/pull/3465)  *(minor)* Thanks [@smashah](https://github.com/smashah)!
+  Create a Bun and TypeScript messaging application with `bunx --bun @open-wa/wa-automate init my-bot`. The public `create()` now prepares a matched browser, presents QR login, and returns a ready messaging client with private persistent session storage.
+
+  Provision missing browsers at startup with shared cache coordination, configurable cache and download policy, and explicit-path errors. Preserve explicit drivers and low-level lifecycle control.
+
+  Return a validated message ID from `sendText`, or throw `SendTextError` with a known-not-sent or uncertain outcome. Never retry an uncertain send automatically.
+- [#3464](https://github.com/open-wa/wa-automate-nodejs/pull/3464)  *(patch)* Thanks [@smashah](https://github.com/smashah)!
+  Describe client return values with named types and generate canonical method references, linked type definitions, and OpenAPI responses from the same contracts.
+
+  Preserve configured session, host, and port values when their CLI flags are omitted. Forward link-code configuration to the runtime and display generated codes in the local CLI console.
+
+  Add bounded session diagnostics for reviewable dashboard issue reports, report the running API package version, and share Base UI controls and theme tokens between docs and dashboard.
+
+## 5.1.0
+<sub>2026-09-29</sub>
+
+- [#3453](https://github.com/open-wa/wa-automate-nodejs/pull/3453)  *(minor)* Thanks [@smashah](https://github.com/smashah)!
+  ## Buttons are back
+
+  Build conversations people can tap through with the new `sendInteractive(to, content)` API: reply buttons, website/call/copy actions, sectioned lists, forms, image carousels and booking cards. Available to **Insiders and above**.
+
+  Forms now have their own `onFormResponse` listener. Receive answers keyed by your question IDs, including arrays for multiple selections, instead of parsing the displayed reply text. `onInteractiveResponse` handles replies, list selections and form submissions with message references for your integration.
+
+  One typed JSON document works across the SDK and HTTP API. `defineInteractiveMessage` provides validation, autocomplete and useful defaults; response events are also available through the HTTP event stream. For advanced integrations, `sendRawMessage` accepts constructed WhatsApp protobuf Message payloads, and native actions expose an extension format.
+
+  See the [interactive messages guide](https://openwa.dev/docs/guides/interactive-messages) for examples and recipient support limits. Update and restart your licensed session to load the new capabilities.
+
+  This release also preserves event bindings during repeated registration, reports confirmed license state correctly in health responses, and improves license bootstrap recovery.
+- [#3453](https://github.com/open-wa/wa-automate-nodejs/pull/3453)  *(patch)* Thanks [@smashah](https://github.com/smashah)!
+  Keep local Bun development on TypeScript source while publishing entry points that resolve the distributed files. npm packages no longer inherit workspace-only source conditions.
+
+## 5.0.0
+
+### Patch Changes
+
+- Updated dependencies [[`6a55aef`](https://github.com/open-wa/wa-automate-nodejs/commit/6a55aef602b347bfffc8550e448585e7776baf18)]:
+  - @open-wa/core@5.0.0
+  - @open-wa/schema@5.0.0
+  - @open-wa/decrypt@5.0.0
+  - @open-wa/domain@5.0.0
+  - @open-wa/hyperemitter@5.0.0
+  - @open-wa/logger@5.0.0
+  - @open-wa/runtime-core@5.0.0
+
 ## 5.0.0-alpha.7
 
 ### Patch Changes

@@ -16,12 +16,12 @@ import type {
 } from '@open-wa/driver-interface';
 import type { HyperEmitter } from '@open-wa/hyperemitter';
 import type { Logger } from '@open-wa/logger';
-import type { OpenWAEventMap } from '../../src/events/eventMap.js';
-import { Transport } from '../../src/transport/Transport.js';
+import type { OpenWAEventMap } from '../../src/events/eventMap';
+import { Transport } from '../../src/transport/Transport';
 import {
   partitionDangerousBrowserArgs,
   sanitizeBrowserArgs,
-} from '../../src/transport/browserConfig.js';
+} from '../../src/transport/browserConfig';
 
 class TestConsoleMessage implements IConsoleMessage {
   constructor(
@@ -83,6 +83,7 @@ class TestRequest implements IRequest {
 
 class TestPage implements IPage {
   readonly name = 'test-driver';
+  readonly initScripts: string[] = [];
   readonly setRequestInterception = vi.fn(async (_enabled: boolean) => {
     if (this.throwOnSetRequestInterception) {
       throw new Error('request interception unsupported');
@@ -117,7 +118,8 @@ class TestPage implements IPage {
     return undefined as Ret;
   }
 
-  async addInitScript(_script: string): Promise<DisposableHandle> {
+  async addInitScript(script: string): Promise<DisposableHandle> {
+    this.initScripts.push(script);
     return { dispose(): void {} };
   }
 
@@ -259,60 +261,111 @@ function createEvents(): HyperEmitter<OpenWAEventMap> {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('Transport launch/config plumbing', () => {
-  it('continues waiting across QR refreshes when both authentication timeouts are disabled', async () => {
-    const logger = createLogger();
+  it('publishes native QR refreshes and renews an expired linking cycle', async () => {
+    vi.useFakeTimers();
     const page = new TestPage();
-    const transport = new Transport({
-      driver: new CaptureDriver(new TestBrowser(page)),
-      events: createEvents(),
-      logger,
-      qrTimeoutMs: 0,
-      authTimeoutMs: 0,
-      qrPollingMs: 0,
-      blockCrashLogs: false,
-    });
-
-    await transport.initialize();
-    vi.spyOn(transport, 'isAuthenticated').mockResolvedValue(undefined);
-    vi.spyOn(transport, 'waitForQr')
-      .mockResolvedValueOnce('first-qr')
-      .mockResolvedValueOnce('second-qr');
-    vi.spyOn(transport, 'waitForSessionLoaded')
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
-
-    const result = await transport.waitForAuthentication();
-
-    expect(result.outcome).toBe('authenticated');
-    expect(transport.waitForQr).toHaveBeenCalledTimes(2);
-    expect(logger.info).toHaveBeenCalledWith('qr_wait_restarted', {
-      reason: 'qr_expired_or_page_context_changed',
-    });
+    const events = createEvents();
+    const driver = new CaptureDriver(new TestBrowser(page));
+    Object.defineProperty(driver, 'name', { value: 'puppeteer' });
+    const transport = new Transport({ driver, events, logger: createLogger() });
+    (transport as any).page = page;
+    vi.spyOn(page, 'evaluateScript')
+      .mockResolvedValueOnce('native-first')
+      .mockResolvedValueOnce({ state: 'UNPAIRED', qr: 'native-second' })
+      .mockResolvedValueOnce({ state: 'UNPAIRED_IDLE', qr: null })
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ state: 'UNPAIRED', qr: 'native-third' });
+    try {
+      expect(await transport.waitForQr()).toBe('native-first');
+      await vi.advanceTimersByTimeAsync(3000);
+      const generated = (events.emit as any).mock.calls.filter(([event]: string[]) => event === 'launch.auth.qr.generated');
+      expect(generated.map(([, payload]: any[]) => payload.details.qr)).toEqual(['native-first', 'native-second', 'native-third']);
+      expect(events.emit).toHaveBeenCalledWith('launch.auth.qr.expired', expect.any(Object));
+      expect(page.evaluateScript).toHaveBeenCalledWith(expect.stringContaining('resetLinkDeviceState'));
+    } finally {
+      (transport as any).stopQrWatcher();
+      vi.useRealTimers();
+    }
   });
 
-  it('keeps finite QR timeout behavior unchanged', async () => {
+  it('returns a native logout during startup to fresh pairing instead of replaying the checkpoint', async () => {
+    const page = new TestPage();
+    const transport = new Transport({ driver: new CaptureDriver(new TestBrowser(page)),
+      events: createEvents(), logger: createLogger() });
+    (transport as any).page = page;
+    (transport as any).portable = { hasCheckpoint: true };
+    vi.spyOn(page, 'url').mockReturnValue('https://web.whatsapp.com/?post_logout=1');
+    const reset = vi.spyOn(transport, 'resetSessionForPairing').mockResolvedValue();
+    const navigate = vi.spyOn(transport, 'navigate').mockResolvedValue();
+
+    await expect(transport.waitForInjectableSession()).resolves.toBe(true);
+    expect(reset).toHaveBeenCalledWith('native_logout');
+    expect(navigate).toHaveBeenCalledOnce();
+  });
+
+  it('retains a saved checkpoint when the startup probe fails', async () => {
+    const page = new TestPage();
+    const transport = new Transport({ driver: new CaptureDriver(new TestBrowser(page)),
+      events: createEvents(), logger: createLogger() });
+    const failure = new Error('Protocol wait timed out');
+    vi.spyOn(page, 'waitForFunction').mockRejectedValue(failure);
+    (transport as any).page = page;
+    (transport as any).portable = { hasCheckpoint: true };
+    const reset = vi.spyOn(transport, 'resetSessionForPairing').mockResolvedValue();
+    vi.spyOn(transport, 'navigate').mockResolvedValue();
+
+    await expect(transport.waitForInjectableSession()).rejects.toBe(failure);
+    expect(reset).not.toHaveBeenCalled();
+  });
+
+  it('retains a saved checkpoint when authentication times out', async () => {
+    const transport = new Transport({ driver: new CaptureDriver(new TestBrowser(new TestPage())),
+      events: createEvents(), logger: createLogger(), authTimeoutMs: 1 });
+    (transport as any).page = new TestPage();
+    (transport as any).portable = { hasCheckpoint: true };
+    vi.spyOn(transport, 'isAuthenticated').mockImplementation(() => new Promise(() => {}));
+    vi.spyOn(transport as any, 'waitForPhoneOutOfReach').mockResolvedValue(false);
+    const reset = vi.spyOn(transport, 'resetSessionForPairing').mockRejectedValue(new Error('Unexpected checkpoint reset'));
+
+    await expect(transport.waitForAuthentication()).resolves.toMatchObject({ outcome: 'auth_timeout', qrSeen: false });
+    expect(reset).not.toHaveBeenCalled();
+  });
+
+  it('reads the host ID from the live patch when Store.Conn.me is unavailable', async () => {
     const page = new TestPage();
     const transport = new Transport({
       driver: new CaptureDriver(new TestBrowser(page)),
       events: createEvents(),
       logger: createLogger(),
-      qrTimeoutMs: 1,
-      authTimeoutMs: 1,
       blockCrashLogs: false,
     });
-
     await transport.initialize();
-    vi.spyOn(transport, 'isAuthenticated').mockResolvedValue(undefined);
-    vi.spyOn(transport, 'waitForQr').mockResolvedValue('qr');
-    vi.spyOn(transport, 'waitForSessionLoaded').mockResolvedValue(false);
 
-    const result = await transport.waitForAuthentication();
+    vi.stubGlobal('Store', { Conn: {} });
+    vi.stubGlobal('moi', () => '1234567890@c.us');
 
-    expect(result.outcome).toBe('qr_timeout');
-    expect(transport.waitForQr).toHaveBeenCalledTimes(1);
+    expect((await transport.getSessionDebugInfo()).hostNumber).toBe('1234567890@c.us');
+  });
+
+  it('does not expose an unrecognized license key as its key type', async () => {
+    const opaqueKey = 'opaqueTestToken123456789';
+    const transport = new Transport({
+      driver: new CaptureDriver(new TestBrowser(new TestPage())),
+      events: createEvents(),
+      logger: createLogger(),
+    });
+
+    const result = await transport.preloadLicenseArtifact({
+      sessionId: 'test',
+      licenseKey: opaqueKey,
+    });
+
+    expect(result.artifact?.keyType).toBe('license');
+    expect(result.artifact?.payload).not.toContain(opaqueKey);
   });
 
   it('forwards userDataDir to driver launch options', async () => {
@@ -354,6 +407,28 @@ describe('Transport launch/config plumbing', () => {
 
     expect(driver.capturedInitContext).toEqual({ logger });
     expect(driver.capturedLaunchOptions?.lightpanda).toEqual(lightpanda);
+  });
+
+  it('injects the configured watermark before navigation', async () => {
+    const page = new TestPage();
+    const transport = new Transport({
+      driver: new CaptureDriver(new TestBrowser(page)),
+      events: createEvents(),
+      logger: createLogger(),
+      watermark: {
+        text: 'AUTOMATION SESSION',
+        color: 'rgb(1, 2, 3)',
+        background: 'rgb(4, 5, 6)',
+      },
+      blockCrashLogs: false,
+    });
+
+    await transport.initialize();
+
+    expect(page.initScripts).toHaveLength(1);
+    expect(page.initScripts[0]).toContain('AUTOMATION SESSION');
+    expect(page.initScripts[0]).toContain('rgb(1, 2, 3)');
+    expect(page.initScripts[0]).toContain('rgb(4, 5, 6)');
   });
 
   it('logs browser console output and page errors when enabled', async () => {

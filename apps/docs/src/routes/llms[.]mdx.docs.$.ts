@@ -18,7 +18,6 @@ function getPageSlugs(splat: string | undefined) {
 }
 
 export const Route = createFileRoute('/llms.mdx/docs/$')({
-  // @ts-expect-error TanStack types mismatch
   server: {
     handlers: {
       GET: async ({ params }: { params: { _splat?: string } }) => {

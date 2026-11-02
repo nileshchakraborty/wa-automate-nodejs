@@ -3,20 +3,44 @@
   "version": "1.0.0",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./button": {
+      "types": "./src/components/ui/button.tsx",
+      "default": "./src/components/ui/button.tsx"
+    },
+    "./dialog": {
+      "types": "./src/components/ui/dialog.tsx",
+      "default": "./src/components/ui/dialog.tsx"
+    },
+    "./popover": {
+      "types": "./src/components/ui/popover.tsx",
+      "default": "./src/components/ui/popover.tsx"
+    },
+    "./theme.css": "./src/theme.css",
+    "./openui": {
+      "types": "./src/openui.tsx",
+      "default": "./src/openui.tsx"
+    }
+  },
   "dependencies": {
-    "@radix-ui/react-avatar": "^1.1.11",
-    "@radix-ui/react-dialog": "^1.1.15",
-    "@radix-ui/react-label": "^2.1.8",
-    "@radix-ui/react-slot": "^1.2.4",
-    "@radix-ui/react-toast": "^1.2.15",
-    "class-variance-authority": "^0.7.0",
+    "@base-ui/react": "catalog:",
+    "@open-wa/plugin-sdk": "workspace:*",
+    "@openuidev/react-lang": "1.0.1",
+    "@radix-ui/react-toast": "^1.2.23",
+    "class-variance-authority": "^0.7.1",
     "clsx": "catalog:",
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "tailwind-merge": "catalog:",
     "tailwindcss": "catalog:",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss-animate": "^1.0.7",
+    "@open-wa/schema": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/react": "catalog:",
@@ -30,5 +54,5 @@
     "url": "https://github.com/open-wa/wa-automate-nodejs.git"
   },
   "private": true,
-  "description": "Reusable React UI components for Open-WA web applications"
+  "description": "Reusable React UI components for open-wa web applications"
 }

@@ -2,6 +2,8 @@ export * from './registry';
 export * from './config';
 export * from './client-config';
 export * from './common-types';
+export * from './return-types';
+export * from './output-json-schema';
 export * from './methods';
 export * from './events';
 export * from './enums';
@@ -41,3 +43,14 @@ export {
 } from './codecs';
 export * from './parameters';
 export * from './http-manifest';
+export * from './interactive';
+export * from './calling';
+export * from './calling-media';
+
+export * from './calling-wire';
+export * from './license';
+export * from './whatsapp-events';
+
+export * from './media-options';
+export * from './polls';
+export * from './session-refresh';

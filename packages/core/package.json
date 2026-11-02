@@ -1,12 +1,13 @@
 {
   "name": "@open-wa/core",
-  "version": "5.0.0-alpha.7",
+  "version": "5.10.0",
   "description": "Core orchestration backbone for open-wa WhatsApp automation",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "exports": {
     ".": {
+      "bun": "./src/index.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs",
       "types": "./dist/index.d.mts"
@@ -25,10 +26,11 @@
     "@open-wa/hyperemitter": "workspace:*",
     "@open-wa/logger": "workspace:*",
     "@open-wa/plugin-sdk": "workspace:*",
+    "@open-wa/runtime-core": "workspace:*",
     "@open-wa/schema": "workspace:*",
+    "@open-wa/session-sync": "workspace:*",
     "effect": "catalog:",
     "hono": "catalog:",
-    "p-queue": "6.6.2",
     "uuid": "catalog:"
   },
   "devDependencies": {
@@ -50,11 +52,22 @@
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      ".": {
+        "import": "./dist/index.mjs",
+        "require": "./dist/index.cjs",
+        "types": "./dist/index.d.mts"
+      }
+    }
   },
   "type": "module",
   "repository": {
     "type": "git",
     "url": "https://github.com/open-wa/wa-automate-nodejs.git"
-  }
+  },
+  "license": "SEE LICENSE IN LICENSE.md",
+  "files": [
+    "dist"
+  ]
 }

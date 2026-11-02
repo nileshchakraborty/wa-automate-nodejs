@@ -33,10 +33,16 @@ export async function getClient(url?: string) {
   if (_client?.socket.connected) return _client
 
   if (!_connecting) {
-    const target = url || getApiUrl()
+    let target = url || getApiUrl()
     _connecting = (async () => {
       if (typeof window !== "undefined") {
         const authStatus = await getGatewayAuthStatus()
+        // Gateway sessions are same-origin behind the LAN reverse proxy. Ignore
+        // stale legacy profiles so API calls and sockets use the authenticated
+        // gateway rather than an old direct :8081 endpoint.
+        if (authStatus?.gateway && !url) {
+          target = window.location.origin
+        }
         if (authStatus && !authStatus.authenticated) {
           throw new Error("Authentication required")
         }

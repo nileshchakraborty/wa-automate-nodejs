@@ -1,258 +1,213 @@
 ---
 title: Session events
-description: Capture QR codes, session data, and launch lifecycle events with the shared event emitter.
+description: Share events between files, observe startup, and manage global subscriptions.
 ---
 
 # Session events
 
-When you need lifecycle visibility outside the client convenience methods, use the shared event emitter `ev`.
+Use `ev` when several files need the same event helper, or when you need to
+observe authentication before `create()` returns. Every import shares the
+same emitter in the current process. Use `client.events` when you want the
+native events from one client.
+
+The Effect hybrid and optional PubSub APIs described below are available from
+OpenWA 5.6.0.
+
+## Observe startup events
+
+Register the listener before starting the session:
 
 ```ts
-import { ev } from '@open-wa/wa-automate';
+import { create, ev } from '@open-wa/wa-automate';
+
+ev.on('client.ready', (_event, sessionId) => {
+  console.log(`Session ${sessionId} is ready`);
+});
+
+const client = await create({ sessionId: 'support' });
 ```
 
-## Full event list
+`client.ready` follows authentication and runtime finalization. For Easy API,
+also wait for `/health` to report both `connected: true` and
+`session.ready: true` before sending. See [readiness](/docs/getting-started/quickstart#3-check-readiness).
 
-The public session lifecycle events are small and focused. Some names are emitted directly by the core event bus, while a few are compatibility or plugin hook names that map to lower-level launch events.
-
-| Event | When it fires | Payload |
-| --- | --- | --- |
-| `core.starting` | The runtime is about to start. | `{ config: unknown }` |
-| `core.started` | The runtime has finished startup. | `{}` |
-| `core.stopping` | The runtime is shutting down. | `{ reason?: string }` |
-| `client.ready` | WhatsApp is authenticated and the client is ready for commands. | `{ sessionId: string }` |
-| `client.disconnected` | A compatibility name for a disconnected session. In the core event map, listen for `session.connection.disconnected`. | `{ sessionId?: string; reason?: string; wasLoggedIn?: boolean }` |
-| `auth.qr` | A plugin hook name for QR generation. In the core event map, this is `launch.auth.qr.generated`. | `{ sessionId: string; qr: string; attempt: number }` |
-| `auth.authenticated` | Authentication has succeeded. The plugin hook maps to `launch.auth.check.after` when `isAuthenticated` is true. | `{ sessionId: string }` |
-| `auth.failure` | Authentication failed or timed out. If your integration emits this compatibility event, treat it as an auth error signal. | `{ sessionId?: string; reason?: string; error?: unknown }` |
-| `session.data` | Legacy session-data style event, if your runtime or migration path emits it. Older examples use `sessionData.**`. | `{ sessionId: string; sessionData: unknown }` |
-
-For low-level launch tracing, you can also listen to the internal `launch.auth.*` and `session.connection.*` events. Prefer the public names above unless you are debugging startup behavior.
-
-## Payload shapes
-
-Core lifecycle events use direct payload objects:
+Native events keep their core payload as the first argument. The second
+argument identifies the session, and the third contains the event name:
 
 ```ts
-type CoreStartingPayload = {
-  config: unknown;
-};
-
-type CoreStartedPayload = Record<string, never>;
-
-type CoreStoppingPayload = {
-  reason?: string;
-};
-
-type ClientReadyPayload = {
-  sessionId: string;
-};
-```
-
-Auth and session events usually include the session id so you can route the event safely:
-
-```ts
-type AuthQrPayload = {
-  sessionId: string;
-  qr: string;
-  attempt: number;
-};
-
-type AuthAuthenticatedPayload = {
-  sessionId: string;
-};
-
-type AuthFailurePayload = {
-  sessionId?: string;
-  reason?: string;
-  error?: unknown;
-};
-
-type ClientDisconnectedPayload = {
-  sessionId?: string;
-  reason?: string;
-  wasLoggedIn?: boolean;
-};
-
-type SessionDataPayload = {
-  sessionId: string;
-  sessionData: unknown;
-};
-```
-
-The low-level `launch.*` events use a step-event shape with tracing fields:
-
-```ts
-type StepEvent<TDetails = Record<string, unknown>> = {
-  correlationId: string;
-  attempt?: number;
-  ts: number;
-  step: string;
-  details?: TDetails;
-  error?: {
-    name: string;
-    message: string;
-    stack?: string;
-  };
-  durationMs?: number;
-};
-```
-
-For example, `launch.auth.qr.generated` carries the QR inside `details`:
-
-```ts
-ev.on('launch.auth.qr.generated', (event) => {
-  const qr = event.details?.qr;
-  const attempt = event.details?.attemptInThisCycle;
+ev.on('session.connection.disconnected', (event, sessionId) => {
+  console.warn(`Session ${sessionId} disconnected`, event.details?.reason);
 });
 ```
 
-## Timing
+## Share application events between files
 
-A first login usually follows this order:
-
-1. `core.starting`, the runtime has accepted the config and is launching.
-2. `auth.qr` or `launch.auth.qr.generated`, a QR is available for the user to scan.
-3. `auth.authenticated` or `launch.auth.check.after`, WhatsApp accepted the login.
-4. `client.ready`, the client can now send commands and receive messages.
-5. `core.started`, startup has completed.
-
-If the session is already authenticated on disk, the QR step can be skipped. If WhatsApp disconnects later, listen for `session.connection.disconnected` or your integration's `client.disconnected` compatibility event.
-
-## Capture QR codes
-
-```ts
-import { ev } from '@open-wa/wa-automate';
-import fs from 'node:fs';
-
-ev.on('qr.**', async (qrcode) => {
-  const imageBuffer = Buffer.from(
-    qrcode.replace('data:image/png;base64,', ''),
-    'base64',
-  );
-
-  fs.writeFileSync('qr_code.png', imageBuffer);
-});
-```
-
-## Capture session data
-
-```ts
-ev.on('sessionData.**', async (sessionData, sessionId) => {
-  // store or encrypt the latest auth payload for your own workflow
-});
-```
-
-## QR/sessionData security
-
-QR codes and session data are sensitive auth material. Anyone who can read them may be able to connect or restore a WhatsApp session.
-
-Keep these rules strict:
-
-- Don't log QR strings, `sessionData`, or base64 session payloads.
-- Don't send them to analytics, crash reporting, or shared support channels.
-- Store session material only when you need it, and encrypt it at rest.
-- Redact these fields before forwarding wildcard event payloads to webhooks or logs.
-- Rotate or delete stored session data when a device is lost, an employee leaves, or a session is no longer trusted.
-
-## Listen to launch namespaces
-
-Event names are typically shaped like:
-
-```text
-namespace.sessionId
-```
-
-Examples:
-
-```ts
-ev.on('qr.**', () => {});
-ev.on('sessionData.**', () => {});
-ev.on('**.session1', () => {});
-ev.on('**.**', (data, sessionId, namespace) => {
-  console.log(namespace, sessionId, data);
-});
-```
-
-Use wildcard subscriptions carefully in multi-session environments so you do not lose track of which session produced the event.
-
-## Multi-session examples
-
-When you run more than one session, keep every event tied to a `sessionId`.
+In `jobs.ts`, register a listener:
 
 ```ts
 import { ev } from '@open-wa/wa-automate';
 
-const sessions = new Map<string, { ready: boolean; lastQrAttempt?: number }>();
+ev.on('app.job.finished', ({ jobId }) => {
+  console.log('Finished:', jobId);
+});
+```
 
-ev.on('qr.**', async (qrcode, sessionId) => {
-  const state = sessions.get(sessionId) ?? { ready: false };
-  sessions.set(sessionId, {
-    ...state,
-    lastQrAttempt: (state.lastQrAttempt ?? 0) + 1,
+In `index.ts`, load that module before emitting the event:
+
+```ts
+import './jobs';
+import { ev } from '@open-wa/wa-automate';
+
+ev.emit('app.job.finished', { jobId: 'daily-summary' });
+```
+
+Run `bun run index.ts`. It prints `Finished: daily-summary`.
+`emit()` invokes listeners immediately, in the same process. It does not store
+or replay events for modules that subscribe later. Use `await ev.emitAsync(...)`
+when your application needs to wait for its asynchronous listeners.
+
+## Use v4 wildcard subscriptions
+
+`*` matches one segment of an event name; `**` matches zero or more. Both
+trailing and leading patterns work, including `qr.**` and `**.support`.
+
+Supported message and state listener aliases use
+`<listener>.<sessionId>.<instanceId>` and carry the familiar envelope:
+
+```ts
+ev.on('onAck.**', ({ sessionId, data: message }) => {
+  console.log(sessionId, message.id, message.ack);
+});
+
+ev.on('onMessage.support.**', ({ data: message }) => {
+  console.log('Incoming message:', message.id);
+});
+```
+
+The envelope contains `{ ts, sessionId, id, event, data }`. Its `id` identifies
+the event; `data.id` identifies the message. Aliases are provided for
+`onMessage`, `onAnyMessage`, `onAck`, `onPollVote`, `onEvent`,
+`onEventResponse`, `onStateChanged`, `onLogout`,
+`onInteractiveResponse`, and `onFormResponse`. An alias does not add a missing
+WhatsApp capability; consult the [migration guide](/docs/getting-started/migrating-to-v5#known-gaps)
+for unsupported listeners.
+
+`eventMode` defaults to `true`. Set it to `false` in `create()` or
+`createClient()` to disable the automatic listener aliases. Native lifecycle
+events and your own application events remain available. A catch-all `**`
+subscription sees both native events and their aliases, so choose one naming
+scheme when processing a message once.
+
+## Authentication and session data
+
+Lifecycle aliases use `<namespace>.<sessionId>` and call listeners with
+`(data, sessionId, namespace)`:
+
+| Pattern | First argument |
+| --- | --- |
+| `qr.**` | The pairing string for your QR renderer. |
+| `linkCode.**` | The generated link code. |
+| `sessionData.**` | The encrypted compact session object after durable storage accepts a save. |
+| `sessionDataBase64.**` | The same compact session JSON encoded as base64. |
+
+The session object contains current v5's encrypted `auth` and `data` values.
+It does not recreate v4 token fields. Custom encryption keys are not included
+in these events. Keep pairing and session data inside a private application;
+never forward them to shared logs, analytics, or public endpoints.
+
+For native event names, QR generation is `launch.auth.qr.generated`, with the
+value in `event.details.qr`. Link-code generation is
+`launch.auth.linkCode.generated`, with the value in `event.details.linkCode`.
+See [link-code login](/docs/getting-started/link-code) and the
+[event reference](/docs/reference/events) for those flows.
+
+## Remove a subscription
+
+Keep the callback reference so you can remove just your listener:
+
+```ts
+const onFinished = ({ jobId }: { jobId: string }) => {
+  console.log('Finished:', jobId);
+};
+
+ev.on('app.job.finished', onFinished);
+ev.off('app.job.finished', onFinished);
+```
+
+`once()` removes its subscription after the first matching event.
+Stopping a client detaches that session's forwarding connection. Other
+sessions and listeners registered by other files keep working.
+
+### Use an Effect scope
+
+If your application uses Effect, `onGlobalEvent()` owns a subscription for
+its current scope and removes it automatically when the scope closes:
+
+```ts
+import { Effect } from 'effect';
+import { ev, onGlobalEvent } from '@open-wa/wa-automate';
+
+await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+  yield* onGlobalEvent('app.job.finished', ({ jobId }) => {
+    console.log('Finished:', jobId);
   });
 
-  await deliverQrToTheRightOwner(sessionId, qrcode);
-});
+  ev.emit('app.job.finished', { jobId: 'daily-summary' });
+})));
 
-ev.on('client.ready', ({ sessionId }) => {
-  sessions.set(sessionId, { ready: true });
-});
-
-ev.on('**.**', (event, sessionId, namespace) => {
-  if (namespace !== 'session.connection.disconnected') return;
-
-  sessions.set(sessionId, { ready: false });
-});
+// The scoped listener has now been removed.
 ```
 
-If you use wildcard events, always include `sessionId` in the data you forward:
+The helper uses the same synchronous emitter. It does not create a queue or
+fiber per message. Session forwarding is also owned by the runtime's Effect
+scope and is removed after shutdown or failed startup. See
+[Effect scopes](https://effect.website/docs/resource-management/scope/) for
+the resource-lifetime model.
+
+### Await Effect listeners
+
+Listeners can return a Promise or an Effect. `emit()` still calls ordinary
+listeners synchronously; Effect and Promise work belongs to the emitter's
+scope. `emitAsync()` waits for listener work and returns the results in listener
+order. Use `yield* ev.emitEffect(name, ...args)` inside Effect to wait without
+starting another root runtime. `ev.onScoped()` and `ev.onAnyScoped()` also
+interrupt in-flight listener work when their scope closes.
+
+### Observe through PubSub
+
+`ev.pubsub()` exposes a native Effect PubSub for queued observers.
+`ev.subscribe()` provides a scoped subscription, and `ev.stream()` provides
+a Stream for filtering, batching, or sequential processing. Ordinary callbacks
+retain their synchronous behavior.
 
 ```ts
-ev.on('**.**', (data, sessionId, namespace) => {
-  auditEvent({
-    sessionId,
-    namespace,
-    kind: 'open-wa-session-event',
-  });
-});
+import { Effect, PubSub } from 'effect';
+import { ev } from '@open-wa/wa-automate';
+
+await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+  const subscription = yield* ev.subscribe();
+  ev.emit('app.job.finished', { jobId: 'daily-summary' });
+  const { event, args } = yield* PubSub.take(subscription);
+  console.log(event, args[0]);
+})));
 ```
 
-## `ev` vs client listener
+Queued packets contain `{ event, args }`, preserving every callback argument,
+including session metadata. The default hub is created on first use, has no
+replay, and retains pending events for active subscribers without a memory cap.
+Choose an explicit finite policy on first access, for example
+`ev.pubsub({ strategy: 'sliding', capacity: 256 })`, if retaining the newest
+observations is preferable to keeping a backlog. Dropping and sliding can lose
+observations; `pubsubStatus` reports rejected emitter publications.
 
-Use `ev` for process-level lifecycle events. It can see startup, authentication, QR generation, disconnects, session data, and other runtime signals that may happen before a client is ready.
+Emitter methods reach callbacks and queued observers. Publishing directly with
+`PubSub.publish(ev.pubsub(), packet)` reaches only queued observers.
+`emitAsync()` waits for callback results, so queued consumers control their
+own completion and retry policies. A subscription ends with its Effect scope;
+stopping one client detaches its forwarding without closing other sessions'
+global subscriptions.
 
-Use client listeners for WhatsApp activity after the client is connected:
-
-```ts
-client.onMessage(async (message) => {
-  if (message.body === 'ping') {
-    await client.sendText(message.from, 'pong');
-  }
-});
-```
-
-The split is practical:
-
-- `ev` answers questions about the runtime, such as "did auth start?", "which session emitted a QR?", or "why did this session disconnect?"
-- `client.onMessage` and similar listeners answer questions about WhatsApp traffic, such as "what message arrived?" or "what should the bot send back?"
-
-## Wildcard patterns
-
-The shared emitter supports wildcard subscriptions. Use them when you need to subscribe across sessions or namespaces.
-
-```ts
-// Every QR event for every session.
-ev.on('qr.**', (qrcode, sessionId) => {});
-
-// Every session-data event for every session, if emitted by your runtime.
-ev.on('sessionData.**', (sessionData, sessionId) => {});
-
-// Every namespace for one session.
-ev.on('**.sales', (data, sessionId, namespace) => {});
-
-// Everything. Keep this for debugging or carefully redacted audit sinks.
-ev.on('**.**', (data, sessionId, namespace) => {});
-```
-
-Wildcard listeners are convenient, but they can capture sensitive data. Filter by namespace, redact before logging, and avoid catch-all listeners in production unless you have a clear retention policy.
+For complete standalone examples and consumer cleanup, read
+[Consume events with Effect](/docs/guides/effect-event-streams). Exact methods,
+buffer options, and counters are in the
+[HyperEmitter reference](/docs/reference/hyperemitter).

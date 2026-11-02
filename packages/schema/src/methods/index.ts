@@ -31,3 +31,6 @@ export * from './session';
 
 // Media Methods
 export * from './media';
+export * from './interactive';
+export * from './calls';
+export * from './whatsapp-events';

@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { getRequestListener } from '@hono/node-server';
-import { createServer } from 'http';
-import { createNodeWebSocket } from '@hono/node-ws';
+import { createAdaptorServer, upgradeWebSocket } from '@hono/node-server';
+import { getConnInfo } from '@hono/node-server/conninfo';
+import { createServer, type Server } from 'node:http';
+import { WebSocketServer } from 'ws';
 import { getHttpMethodDefinitions, type Config } from '@open-wa/schema';
 import '@open-wa/schema';
 import {
@@ -14,9 +15,13 @@ import { createApiMiddleware } from './createApiMiddleware';
 import { createHonoMcpAdapter } from '@open-wa/mcp';
 import { registerMetaRoutes } from './routes/meta';
 import { registerDebugRoutes } from './routes/debug';
+import { registerCallingRoutes } from './routes/calls';
+import { registerSessionRefreshRoutes } from './routes/session-refresh';
 import { registerAgentDiscoveryRoutes } from './routes/agent-discovery';
 import { type EventBridge } from './events/EventBridge';
 import { HealthStore } from './health/HealthStore';
+import { DiagnosticStore } from './diagnostics/DiagnosticStore';
+import { API_VERSION } from './version';
 import { EventBroadcaster } from './events/EventBroadcaster';
 import { ElasticEmitter } from './monitoring/elastic';
 import {
@@ -65,12 +70,18 @@ export class ApiServer {
   private client: ClientMethodMap | undefined;
   private elasticEmitter?: ElasticEmitter;
   private latestQR: string | null = null;
+  private qrProvider?: () => Promise<string | null>;
+  private logoutHandler?: () => Promise<void>;
   private screencastManager: ScreencastManager;
-  private injectWebSocket: ((server: unknown) => void) | null = null;
+  private server?: Server;
+  private dashboardDevServer?: { close(): Promise<void> };
   private isDashboardActive: boolean = false;
   private pluginHost?: PluginHost;
+  private pluginApp = new Hono();
   private healthStore: HealthStore = new HealthStore();
+  private diagnosticStore: DiagnosticStore = new DiagnosticStore();
   private eventBroadcaster: EventBroadcaster;
+  private mcpAdapter?: ReturnType<typeof createHonoMcpAdapter>;
   private eventBridge?: EventBridge;
   private eventBridgeListener?: (event: string, payload: any) => void;
   private readinessProvider?: () =>
@@ -104,12 +115,6 @@ export class ApiServer {
     this.screencastManager = new ScreencastManager();
     this.eventBroadcaster = new EventBroadcaster(this.config.sessionId);
 
-    // Set up WebSocket adapter for Node.js
-    const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({
-      app: this.app,
-    });
-    this.injectWebSocket = injectWebSocket as (server: unknown) => void;
-
     if (this.config.elasticUrl) {
       this.elasticEmitter = new ElasticEmitter({
         url: this.config.elasticUrl,
@@ -121,7 +126,8 @@ export class ApiServer {
       });
     }
 
-    this.setupMiddleware();
+    this.setupMiddleware(options.verbose);
+    registerCallingRoutes(this.app, { config: this.config, upgrade: upgradeWebSocket, getService: () => this.client?.getCallingService?.() });
     this.registerRoutes();
 
     // Register screencast WebSocket route
@@ -143,11 +149,14 @@ export class ApiServer {
     this.eventBridge = bridge;
     this.eventBridgeListener = (event: string, payload: any) => {
       this.healthStore.processEvent(event, payload);
+      this.diagnosticStore.capture(event, payload);
       this.eventBroadcaster.broadcast(event, payload);
+      this.mcpAdapter?.publishEvent(event, payload);
     };
 
     // Also wire events into the HealthStore so /health returns accumulated data
     bridge.onAny(this.eventBridgeListener);
+    this.diagnosticStore.attach();
   }
 
   public setReadinessProvider(
@@ -172,6 +181,10 @@ export class ApiServer {
    * Call this once the browser page is ready.
    */
   public async setPage(page: IScreencastPage): Promise<void> {
+    if (this.config.useLightpanda) {
+      await this.screencastManager.clearPage();
+      return;
+    }
     await this.screencastManager.setPage(page);
   }
 
@@ -182,8 +195,17 @@ export class ApiServer {
     await this.screencastManager.clearPage();
   }
 
-  public setQR(qr: string) {
+  public setQR(qr: string | null) {
     this.latestQR = qr;
+  }
+
+  /** Prefer the browser's current QR over the event cache, which may lag a refresh. */
+  public setQrProvider(provider: (() => Promise<string | null>) | undefined) {
+    this.qrProvider = provider;
+  }
+
+  public setLogoutHandler(handler: (() => Promise<void>) | undefined) {
+    this.logoutHandler = handler;
   }
 
   public getApp() {
@@ -200,17 +222,35 @@ export class ApiServer {
    */
   public mountPlugins(pluginHost: PluginHost): void {
     this.pluginHost = pluginHost;
+    const pluginApp = new Hono();
 
     // Mount each plugin's routes at /plugins/<name>/
-    for (const { name, router } of pluginHost.getRoutes()) {
-      this.app.route(`/plugins/${name}`, router);
+    for (const { name, router, routeAuth } of pluginHost.getRoutes()) {
+      if (routeAuth === 'host') {
+        pluginApp.use(`/plugins/${name}/*`, async (c, next) => {
+          if (this.config.apiKey) {
+            if (c.req.header('X-API-Key') !== this.config.apiKey) return c.json({ error: 'Invalid or missing API key.' }, 401);
+          } else {
+            const address = getConnInfo(c).remote.address;
+            if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address ?? '')) {
+              return c.json({ error: 'Configure an Easy API key for remote plugin access.' }, 401);
+            }
+            const origin = c.req.header('Origin');
+            if (origin && origin !== new URL(c.req.url).origin) return c.json({ error: 'Cross-origin plugin access requires an API key.' }, 403);
+          }
+          await next();
+        });
+      }
+      pluginApp.route(`/plugins/${name}`, router);
     }
+    this.pluginApp = pluginApp;
   }
 
   public async start() {
     let viteDevServer: any = null;
     if (this.config.dashboard) {
       viteDevServer = await setupViteDevServer();
+      this.dashboardDevServer = viteDevServer ?? undefined;
       if (!viteDevServer) {
         this.isDashboardActive = await mountDashboardProduction(this.app);
       } else {
@@ -218,38 +258,38 @@ export class ApiServer {
       }
     }
 
-    const honoListener = getRequestListener(this.app.fetch);
-
-    const requestListener = (req: any, res: any) => {
-      if (viteDevServer && req.url?.startsWith('/dashboard')) {
-        viteDevServer.middlewares(req, res, () => {
-          honoListener(req, res);
-        });
-        return;
-      }
-      honoListener(req, res);
-    };
-
-    const server = createServer(requestListener);
-    server.listen(this.config.port, this.config.host, () => {
-      console.log(
-        `Server running on http://${this.config.host}:${this.config.port}`,
-      );
+    const server = createAdaptorServer({
+      fetch: this.app.fetch,
+      websocket: {
+        server: new WebSocketServer({ noServer: true }),
+      },
+      createServer: (options, honoListener) =>
+        createServer(options, (request, response) => {
+          if (viteDevServer && request.url?.startsWith('/dashboard')) {
+            viteDevServer.middlewares(request, response, () => {
+              void honoListener(request, response);
+            });
+            return;
+          }
+          void honoListener(request, response);
+        }),
     });
+    this.server = server as Server;
 
-    if (this.injectWebSocket) {
-      let honoUpgradeListener: Function | null = null;
-      this.injectWebSocket({
-        on: (event: string, listener: Function) => {
-          if (event === 'upgrade') honoUpgradeListener = listener;
-        },
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        server.off('error', onError);
+        reject(error);
+      };
+      server.once('error', onError);
+      server.listen(this.config.port, this.config.host, () => {
+        server.off('error', onError);
+        console.log(
+          `Server running on http://${this.config.host}:${this.config.port}`,
+        );
+        resolve();
       });
-      if (honoUpgradeListener) {
-        server.on('upgrade', (req, socket, head) => {
-          honoUpgradeListener!(req, socket, head);
-        });
-      }
-    }
+    });
 
     if (this.elasticEmitter) {
       await this.elasticEmitter.start();
@@ -257,7 +297,23 @@ export class ApiServer {
   }
 
   public async stop() {
+    if (this.eventBridge && this.eventBridgeListener) this.eventBridge.offAny(this.eventBridgeListener);
+    await this.mcpAdapter?.close();
+    this.mcpAdapter = undefined;
+    await this.dashboardDevServer?.close();
+    this.dashboardDevServer = undefined;
+    const server = this.server;
+    this.server = undefined;
     await this.screencastManager.destroy();
+    this.eventBroadcaster.close();
+    if (server?.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+        // Dashboard SSE responses remain open by design. Once admission has
+        // stopped, close them so shutdown can release the listening socket.
+        server.closeAllConnections();
+      });
+    }
     if (this.elasticEmitter) {
       await this.elasticEmitter.stop();
     }
@@ -282,7 +338,7 @@ export class ApiServer {
       : false;
   }
 
-  private setupMiddleware() {
+  private setupMiddleware(verbose = false) {
     this.app.use('/*', rateLimitMiddleware(300, 60_000));
 
     this.app.use('/*', async (c, next) => {
@@ -343,12 +399,13 @@ export class ApiServer {
       await next();
     });
 
-    if (this.config.logLevel !== 'silent') {
+    if (verbose || ['debug', 'verbose'].includes(this.config.logLevel?.toLowerCase() ?? '')) {
       this.app.use('*', logger());
     }
   }
 
   private registerRoutes() {
+    registerSessionRefreshRoutes(this.app, this.config, () => this.client);
     const methodDefinitions = getHttpMethodDefinitions();
     registerAgentDiscoveryRoutes(this.app, {
       config: this.config,
@@ -358,6 +415,9 @@ export class ApiServer {
     this.app.get('/plugins/manifest', (c) =>
       c.json(this.pluginHost?.getManifest() ?? { plugins: [] }),
     );
+    // The host router can already be serving health/dashboard requests while
+    // plugins initialize. Swap the delegate instead of mutating its matcher.
+    this.app.all('/plugins/*', (c) => this.pluginApp.fetch(c.req.raw, c.env));
 
     this.app.get('/health/live', (c) => c.json({ status: 'ok' }));
 
@@ -365,7 +425,7 @@ export class ApiServer {
       const healthSnapshot = this.healthStore.getSnapshot();
       return c.json({
         status: 'ok',
-        version: '5.0.0',
+        version: API_VERSION,
         host: {
           available: true,
           api: true,
@@ -381,6 +441,10 @@ export class ApiServer {
           },
         },
         capabilities: {
+          livePortalAvailable: !this.config.useLightpanda,
+          livePortalUnavailableReason: this.config.useLightpanda
+            ? 'Lightpanda does not render a visual feed. Use Chrome or Chromium for Live Portal.'
+            : undefined,
           apiKeyConfigured: Boolean(this.config.apiKey),
           mcpEnabled: Boolean(this.config.mcp?.enabled),
           mcpAvailable: Boolean(this.config.apiKey && this.config.mcp?.enabled),
@@ -407,12 +471,19 @@ export class ApiServer {
       });
     });
 
-    this.app.get('/qr', (c) => {
+    this.app.get('/qr', async (c) => {
       if (!this.config.ezqr) {
         return c.json({ error: 'QR endpoint disabled' }, 404);
       }
 
-      if (!this.latestQR) {
+      if (this.readinessProvider?.()?.ready) {
+        return c.json({ error: 'Session is already connected' }, 404);
+      }
+
+      // A provider owns the live pairing surface. Never fall back to an old
+      // event value while that provider is unavailable or has cleared the QR.
+      const qr = this.qrProvider ? await this.qrProvider().catch(() => null) : this.latestQR;
+      if (!qr) {
         return c.json(
           {
             error: 'QR code not available',
@@ -423,9 +494,27 @@ export class ApiServer {
       }
 
       return c.json({
-        qr: this.latestQR,
+        qr,
         note: 'Scan this QR code in WhatsApp',
       });
+    });
+
+    this.app.post('/session/logout', async (c) => {
+      if (c.req.header('X-OpenWA-Confirm') !== 'unlink') {
+        return c.json({ error: 'Explicit unlink confirmation required' }, 400);
+      }
+      if (!this.isSessionConnected()) {
+        return c.json({ error: 'Session is not connected' }, 409);
+      }
+      if (!this.logoutHandler) {
+        return c.json({ error: 'Logout action is unavailable' }, 503);
+      }
+      try {
+        await this.logoutHandler();
+        return c.json({ status: 'logout_requested' }, 202);
+      } catch (error) {
+        return c.json({ error: error instanceof Error ? error.message : 'Logout failed' }, 502);
+      }
     });
 
     this.app.get('/api/events', (c) => {
@@ -461,6 +550,7 @@ export class ApiServer {
     registerDebugRoutes(this.app, {
       config: this.config,
       getConfig: () => this.config,
+      getDiagnostics: () => this.diagnosticStore.getSnapshot(),
       setIntegration: (id, data) => {
         if (!this.config.integrations) {
           this.config.integrations = {};
@@ -479,14 +569,14 @@ export class ApiServer {
     );
 
     if (this.config.mcp?.enabled) {
-      const mcpAdapter = createHonoMcpAdapter({
+      this.mcpAdapter = createHonoMcpAdapter({
         config: this.config,
         clientSource: () => this.client,
         elasticEmitter: this.elasticEmitter,
         basePath: '/api',
         isSessionConnected: () => this.isSessionConnected(),
       });
-      mcpAdapter.mount(this.app, this.config.mcp.path || '/mcp');
+      this.mcpAdapter.mount(this.app, this.config.mcp.path || '/mcp');
     }
   }
 }

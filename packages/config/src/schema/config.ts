@@ -5,6 +5,17 @@
  * Schemas are the single source of truth for both TypeScript types and runtime validation.
  */
 import { z } from 'zod';
+import { HooksConfigSchema } from '../hooks';
+
+const CallingDescriptorSchema = z.union([z.string(), z.object({
+  kind: z.enum(['file', 'url', 'device', 'remote']), path: z.string().optional(), url: z.string().optional(), deviceId: z.string().optional(),
+  raw: z.object({ encoding: z.enum(['pcm16le', 'float32le']), sampleRate: z.number().min(8000).max(192000), channels: z.union([z.literal(1), z.literal(2)]) }).optional(),
+  headers: z.record(z.string(), z.string()).optional(), overwrite: z.boolean().optional(), loop: z.boolean().optional(),
+}), z.null()]);
+export const CallingOptionsSchema = z.object({
+  defaults: z.object({ microphone: CallingDescriptorSchema.optional(), speaker: CallingDescriptorSchema.optional(), camera: CallingDescriptorSchema.optional(), onMediaFailure: z.enum(['end', 'keep-open']).optional() }).optional(),
+  preparationTimeoutMs: z.number().positive().optional(),
+});
 
 // ============================================================================
 // Enums
@@ -132,15 +143,24 @@ export const LightpandaOptionsSchema = z.object({
     .boolean()
     .default(false)
     .describe('Disable Lightpanda telemetry for deterministic startup.'),
+  experimentalWhatsApp: z
+    .boolean()
+    .default(true)
+    .describe('Enable the experimental WhatsApp worker and crypto setup used by Lightpanda mode.'),
 });
 
 export const S3SyncSchema = z.object({
   bucket: z.string().describe('S3 bucket name'),
-  region: z.string().describe('S3 region'),
+  region: z.string().default('us-east-1').describe('S3 region'),
   accessKeyId: z.string().describe('AWS access key ID'),
   secretAccessKey: z.string().describe('AWS secret access key'),
+  sessionToken: z.string().optional().describe('Temporary S3 credential token'),
+  provider: z.string().optional().describe('PicoS3 provider, such as AWS, R2, MINIO or DO'),
   endpoint: z.string().optional().describe('Custom S3 endpoint'),
   host: z.string().optional().describe('PicoS3 support'),
+  url: z.string().optional().describe('Compatibility alias for a custom S3 endpoint'),
+  directory: z.string().optional().describe('Portable-session object prefix; defaults to _sessionData'),
+  headers: z.record(z.string(), z.string()).optional().describe('S3 storage-encryption and temporary-credential headers'),
   syncInterval: z.number().default(600000).describe('Sync interval in ms'),
   enableLocalCompression: z.boolean().optional().describe('Enable local session compression'),
 });
@@ -166,6 +186,25 @@ export const McpConfigSchema = z.object({
     .boolean()
     .default(true)
     .describe('Expose /meta/mcp-tools.json for dashboard and debugging.'),
+  events: z.object({
+    enabled: z.boolean().default(true).describe('Advertise webhook MCP Events alongside tools.'),
+    storePath: z.string().optional().describe('Private SQLite subscription and delivery journal; defaults to an instance-specific file under .open-wa.'),
+    lifetimeMs: z.number().int().positive().max(7 * 24 * 60 * 60_000).default(24 * 60 * 60_000)
+      .describe('Maximum granted subscription lifetime in milliseconds. ChatGPT refreshes before expiration.'),
+  }).optional().describe('Durable MCP Events delivery configuration.'),
+});
+
+export const ChatSandboxConfigSchema = z.object({
+  isolation: z.enum(['worker', 'process', 'container']).default('process'),
+  timeoutMs: z.number().int().positive().default(30_000),
+  idleTimeoutMs: z.number().int().positive().default(5 * 60_000),
+  memoryMb: z.number().int().positive().default(256),
+  concurrency: z.number().int().positive().default(1),
+  filesystem: z.enum(['none', 'read-only', 'workspace']).default('none'),
+  network: z.enum(['none', 'allowlist']).default('none'),
+  networkAllowlist: z.array(z.string()).default([]),
+  env: z.union([z.literal('none'), z.array(z.string())]).default('none'),
+  capabilities: z.array(z.string()).default(['sendText']),
 });
 
 // ============================================================================
@@ -173,13 +212,20 @@ export const McpConfigSchema = z.object({
 // ============================================================================
 
 export const ConfigSchema = z.object({
+  calling: CallingOptionsSchema.optional().describe('Calling media defaults. Calling actions use the existing licensed patch flow automatically.'),
+  licenseConfig: z.object({ url: z.string().url().optional(), offlineLicenseMode: z.boolean().optional() }).optional().describe('Licensed implementation delivery endpoint.'),
   // Session & Authentication
   sessionData: z
     .union([SessionDataSchema, z.string()])
     .optional()
     .describe(
-      'Deprecated compatibility input for JSON or base64 session restore. This MD-obsolete flow remains only for legacy migration. Prefer userDataDir for persistent auth state.'
+      'Encrypted session seed: auth/data object, JSON, base64 JSON, or NUKE to reset. The obsolete v4 browser-token format is not supported.'
     ),
+
+  sessionDataEncryptionKey: z.string().regex(/^[A-Za-z0-9+/]{43}=$/, 'Expected a base64-encoded 32-byte encryption key')
+    .optional().describe('Customer key for compact session files. Keep the same secret across containers. Omit to use the baked default.'),
+  sessionDataEncryptionKeyFile: z.string().min(1).optional()
+    .describe('Mounted secret file containing the base64 encryption key. Mutually exclusive with sessionDataEncryptionKey.'),
 
   linkCode: z.string().optional().describe('Link code for new login method.'),
 
@@ -189,26 +235,26 @@ export const ConfigSchema = z.object({
     .string()
     .default('')
     .describe(
-      'Deprecated legacy path for .data.json session restore files. This only exists for MD-obsolete JSON session compatibility. Prefer userDataDir.'
+      'Session file directory or explicit .data.json filename; defaults to {sessionId}.data.json in the working directory.'
     ),
 
   userDataDir: z
     .string()
     .optional()
-    .describe('Browser profile directory used for persistent session storage.'),
+    .describe('Ignored by compact authentication, which always uses a disposable browser profile.'),
 
   ephemeral: z
     .boolean()
     .default(false)
     .describe(
-      'When true, prevents auto-derivation of userDataDir from sessionId. The browser launches with an ephemeral temp profile that is discarded on exit. Useful for testing without leaving _IGNORE_ directories behind.'
+      'Compact authentication always uses a disposable profile and persists its encrypted session file, regardless of this setting.'
     ),
 
   skipSessionSave: z
     .boolean()
     .default(false)
     .describe(
-      'Deprecated legacy flag for .data.json session persistence. This only affects the MD-obsolete JSON restore path. Prefer userDataDir-managed persistence.'
+      'Disable the local encrypted session file while retaining durable S3 persistence. Requires S3 configuration.'
     ),
 
   licenseKey: z
@@ -237,7 +283,17 @@ export const ConfigSchema = z.object({
 
   executablePath: z.string().optional().describe('Path to chrome instance.'),
 
-  useChrome: z.boolean().default(false).describe('Automatically detect chrome instance.'),
+  browser: z.object({
+    source: z.enum(['auto', 'system', 'managed']).optional().describe('Detect a browser and ask when missing, require a system installation, or use only a managed download/cache.'),
+    kind: z.enum(['chrome', 'chromium']).optional().describe('Managed browser to download and reuse when no executable path is supplied.'),
+    download: z.enum(['auto', 'never']).optional().describe('Automatically provision a missing browser, or require a cached browser for offline deployments.'),
+    cacheDirectory: z.string().optional().describe('Browser cache directory. Defaults to Puppeteer configuration and PUPPETEER_CACHE_DIR.'),
+    downloadBaseUrl: z.string().url().optional().describe('Optional Chrome for Testing download mirror. Downloads honor HTTP_PROXY, HTTPS_PROXY and NO_PROXY.'),
+  }).optional().describe('Puppeteer browser provisioning policy.'),
+
+  useChrome: z.boolean().default(false).describe('Use installed Google Chrome, or download Chrome for Testing when missing. The CLI prefers installed Chrome by default.'),
+
+  useChromium: z.boolean().default(false).describe('Use installed Chromium, or download it when missing. Proprietary video/audio codecs may be unavailable.'),
 
   useLightpanda: z.boolean().default(false).describe('Enable Lightpanda local browser mode.'),
 
@@ -338,6 +394,11 @@ export const ConfigSchema = z.object({
   // Safety & Error Handling
   safeMode: z.boolean().default(false).describe('Check if page is valid before each command.'),
 
+  sandboxChats: z
+    .union([z.boolean(), ChatSandboxConfigSchema])
+    .default(false)
+    .describe('Run explicit per-chat user code in a worker, process, or container sandbox.'),
+
   onError: z.nativeEnum(OnError).default(OnError.NOTHING).describe('Error handling strategy.'),
 
   throwErrorOnTosBlock: z.boolean().optional().describe('Throw error if session blocked or unable to get QR.'),
@@ -399,10 +460,8 @@ export const ConfigSchema = z.object({
 
   linkParser: z.string().default('https://link.openwa.cloud/api').describe('URL of serverless meta grabber.'),
 
-  // Preprocessors & Cloud Upload
-  messagePreprocessor: z.any().optional().describe('Message preprocessor options.'),
-
-  preprocFilter: z.string().optional().describe('Filter for message preprocessor.'),
+  // Host hooks run before plugin event handlers and actions.
+  hooks: HooksConfigSchema.optional().describe('Host hooks and chat restrictions for plugins.'),
 
   cloudUploadOptions: CloudUploadOptionsSchema.optional().describe('Options for cloud upload preprocessor.'),
 
@@ -523,6 +582,7 @@ export type Viewport = z.infer<typeof ViewportSchema>;
 export type LightpandaOptions = z.infer<typeof LightpandaOptionsSchema>;
 export type S3Sync = z.infer<typeof S3SyncSchema>;
 export type LoggingTransport = z.infer<typeof LoggingTransportSchema>;
+export type ChatSandboxConfig = z.infer<typeof ChatSandboxConfigSchema>;
 
 // ============================================================================
 // Partial/Strict Variants

@@ -163,7 +163,6 @@ export class InjectionController {
     if (existing) {
       existing.handler = handler;
       existing.required = options.required ?? existing.required;
-      existing.installed = false;
     } else {
       this.persistentBindings.set(name, {
         name,
@@ -453,7 +452,8 @@ export class InjectionController {
     }
 
     try {
-      await this.page.exposeFunction(binding.name, binding.handler);
+      // Keep the page binding stable while allowing registration to update its handler.
+      await this.page.exposeFunction(binding.name, (...args: any[]) => binding.handler(...args));
       binding.installed = true;
       this.logger.debug('injection_controller_binding_registered', {
         binding: binding.name,
@@ -492,11 +492,12 @@ export class InjectionController {
   private attachPageLifecycle(page: IPage): void {
     this.pageRegistry.add(
       page.on('framenavigated', (frame) => {
-        if (!this.isMainFrame(frame)) {
+        if (this.page !== page || !this.isMainFrame(frame)) {
           return;
         }
 
         void this.enqueue(async () => {
+          if (this.page !== page) return;
           this.bumpDocumentGeneration();
           this.clearRuntimeBridgeState();
           await this.runtimeRegistry.disposeAll();

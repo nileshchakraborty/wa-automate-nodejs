@@ -1,18 +1,11 @@
 > [!WARNING]
-> By using this project you explicitly agree to the [Terms of Service](./tos.md).
+> When you use this project, you explicitly agree to the [Terms of Service](./tos.md).
 >
 > This project is unofficial and is not affiliated with WhatsApp or Meta. Use it at your own risk.
 
-> [!CAUTION]
-> This repository is currently on version 5, which is still in alpha and may have issues.
->
-> For now, use version 4 instead unless you are explicitly testing or contributing to v5.
->
-> The last stable version is **4.76.0**:
->
-> ```bash
-> npx @open-wa/wa-automate@4.76.0
-> ```
+> [!NOTE]
+> Version 5 is the current release line. Existing v4 applications should use an
+> explicit v4 version while they migrate; unqualified installs use v5.
 
 <div align="center">
 <img src="https://raw.githubusercontent.com/open-wa/wa-automate-nodejs/master/resources/hotfix-logo.png" width="128" height="128"/>
@@ -39,9 +32,9 @@
 
 ## What this is
 
-`@open-wa/wa-automate` is the Node.js toolkit for turning WhatsApp Web automation into something you can actually build on: a local API, a bot backend, a webhook source, a plugin host, or an MCP server for AI agents.
+`@open-wa/wa-automate` is a Node.js toolkit for WhatsApp Web automation. You can make a local API, bot backend, webhook source, plugin host, or MCP server.
 
-This repo is now the **v5 monorepo**. That means the architecture is cleaner and more modular, but the package version here is still **`5.0.0-alpha.0`**. If you are running a mature v4 production system, stay on **4.76.0** for now and test v5 separately.
+This repository is the **v5 monorepo**. Its packages share the stable **5.0.0** release and use separate modules for the runtime, drivers, API, and integrations.
 
 Need a WhatsApp API running quickly? Start with **Easy API**. Want the browser/runtime inside your own app? Use the **embedded runtime**. Building integrations, proxying sessions, or exposing WhatsApp to an AI agent? Those surfaces are in this repo too.
 
@@ -65,7 +58,7 @@ Need a WhatsApp API running quickly? Start with **Easy API**. Want the browser/r
 | Plugins | Load reusable integrations with `plugins` and `pluginConfig` | [Plugins and integrations](#plugins-and-integrations) |
 | Webhooks | Push WhatsApp events into your own service | [Plugins and integrations](#plugins-and-integrations) |
 | Chatwoot | Bridge WhatsApp into Chatwoot conversations | [Plugins and integrations](#plugins-and-integrations) |
-| Cloudflare proxy | Reach a local session remotely without exposing local ports directly | [Cloudflare Session Proxy](#cloudflare-session-proxy) |
+| Cloudflare proxy | Get remote access to a local session without direct exposure of local ports | [Cloudflare Session Proxy](#cloudflare-session-proxy) |
 | MCP | Let AI agents discover and call Easy API methods as tools | [AI-agent integration](#ai-agent-integration-mcp) |
 
 ## Pick your path
@@ -75,7 +68,7 @@ Need a WhatsApp API running quickly? Start with **Easy API**. Want the browser/r
 | get a WhatsApp-backed API running in minutes | [Quick start: Easy API](#quick-start-easy-api) |
 | build a bot without owning the browser runtime | [Simple automation: SocketClient](#simple-automation-socketclient) |
 | own the runtime inside your own Node.js app | [Deep integration: embedded runtime](#deep-integration-embedded-runtime) |
-| move from stable v4 into the v5 alpha carefully | [Migrating from v4 to v5](#migrating-from-v4-to-v5) |
+| move an existing v4 application to v5 | [Migrating from v4 to v5](#migrating-from-v4-to-v5) |
 | publish or share reusable automation pieces | [Plugins and integrations](#plugins-and-integrations) |
 
 ## The short version
@@ -92,12 +85,12 @@ You can use this project in a few practical ways:
 Want to convert a WhatsApp account into an API with the least ceremony? Run the CLI:
 
 ```bash
-npx @open-wa/wa-automate --port 8080
+npx @open-wa/wa-automate@latest --port 8080
 ```
 
 That starts an Easy API instance, launches the first-run authentication flow, and exposes interactive docs for the live session.
 
-**v5 is alpha right now**, so keep commands explicit and test in a disposable environment before wiring it into anything important.
+Use an explicit version in deployments that need repeatable installs.
 
 For first login, the runtime will ask you to authenticate. Depending on your setup, either:
 
@@ -123,16 +116,13 @@ Useful first commands:
 
 ```bash
 # choose a port
-npx @open-wa/wa-automate --port 8080
+npx @open-wa/wa-automate@latest --port 8080
 
 # provide your own API key
-npx @open-wa/wa-automate --port 8080 --api-key "your-secure-key"
+npx @open-wa/wa-automate@latest --port 8080 --api-key "your-secure-key"
 
 # run a named session
-npx @open-wa/wa-automate --session-id sales --port 8081
-
-# send events to your service
-npx @open-wa/wa-automate --webhook "https://your-app.example/webhooks/open-wa"
+npx @open-wa/wa-automate@latest --session-id sales --port 8081
 ```
 
 Good defaults for a first real session:
@@ -141,7 +131,7 @@ Good defaults for a first real session:
 - protect the API with an `--api-key` before exposing it outside your machine
 - keep business logic in your own app and let open-wa own the WhatsApp runtime
 
-If your goal is simply "connect WhatsApp to another service", add `--webhook` first and write no custom runtime code until you know you need it.
+If your goal is simply "connect WhatsApp to another service", configure `@open-wa/integration-webhook` in `wa.config.*`. The v5 CLI parses `--webhook` but currently warns that CLI webhook registration parity is not restored, so that flag does not enable source-backed delivery. See [Webhooks for Business](apps/docs/content/docs/guides/webhooks-for-business.mdx) for the working configuration.
 
 If you prefer Docker:
 
@@ -152,7 +142,7 @@ docker run -p 8080:8080 --init openwa/wa-automate
 Docker notes:
 
 - this is best for local testing or a disposable first run unless you also plan session persistence properly
-- `--init` is recommended so zombie processes are cleaned up properly
+- use `--init` so the init process removes zombie processes
 - you can pin the library version with `W_A_V`, for example `-e W_A_V=4.42.1`
 
 ## Simple automation: SocketClient
@@ -162,7 +152,7 @@ Building a bot, worker, or app integration? Keep the WhatsApp runtime in Easy AP
 Start the runtime:
 
 ```bash
-npx @open-wa/wa-automate --port 8080 --api-key "your-secure-key"
+npx @open-wa/wa-automate@latest --port 8080 --api-key "your-secure-key"
 ```
 
 Install the remote consumer in your app:
@@ -197,7 +187,7 @@ Why this path is good for most builders:
 - your app stays small and focused on automation logic
 - the current v5 runtime uses **HTTP RPC for commands** and **Server-Sent Events for runtime events** behind the compatibility client
 
-This is usually the best choice if you want to ship automation fast without owning browser setup, session lifecycle, and API hosting in the same process.
+Use this choice to deploy automation quickly. The Easy API process owns browser setup, session lifecycle, and API hosting.
 
 ## Deep integration: embedded runtime
 
@@ -235,8 +225,8 @@ start().catch(console.error);
 Important v5 reality:
 
 - the repo’s current **public contract** centers on `createClient`
-- some docs are still being reorganized from the older v4-era shape
-- pluggable browser drivers are now part of the architecture
+- maintainers are still reorganizing some older v4 docs
+- pluggable browser drivers are part of the architecture
 
 Available runtime driver packages in this repo:
 
@@ -264,18 +254,18 @@ Common high-value CLI flags include:
 ```bash
 --port 8080
 --api-key "your-secure-key"
---webhook "https://your-app.example/webhooks/open-wa"
 --session-id sales
+--config ./wa.config.mjs
 --pm2
 --license-key "YOUR-LICENSE-KEY"
 ```
 
-Some older docs and examples still mention additional legacy or transitional flags. For v5 alpha onboarding, prefer the smaller set above unless you have verified the exact flag against the version you are running.
+Some older docs and examples still mention additional legacy or transitional flags. For v5 onboarding, prefer the smaller set above unless you have verified the exact flag against the version you are running.
 
 For contributors to this monorepo, the repo currently declares:
 
 - **Node.js** `>=22.21.1`
-- **pnpm** `11.9.x`
+- **pnpm** `11.15.1`
 
 The exact toolchain is pinned in [`mise.toml`](./mise.toml) (`mise install`),
 and the full contributor setup — including browser-automation dependencies —
@@ -332,12 +322,12 @@ Good examples to copy from in this repo:
 - [`./integrations/chatwoot`](./integrations/chatwoot)
 - [`./integrations/cloudflare`](./integrations/cloudflare)
 
-What is **not** clearly documented yet as a stable public workflow:
+The docs do not yet define these stable public workflows:
 
 - a public plugin marketplace
 - a formal plugin discovery registry for community downloads
 
-So today, “share a plugin” realistically means “publish a package people can install and load”.
+So today, “share a plugin” realistically means “publish a package users can install and load”.
 
 ### Built-in integration examples
 
@@ -372,12 +362,28 @@ This is the cleanest path if you want remote access but do not want to invent yo
 
 If your goal is to let an AI agent interact with WhatsApp, the cleanest surface is the built-in **Model Context Protocol** server.
 
-MCP exposes every Easy API method as a discoverable tool that AI agents (Claude, Cursor, Windsurf, custom agents) can call directly — no manual HTTP wiring needed.
+MCP exposes each Easy API method as a tool. AI agents such as Claude, Cursor, and Windsurf can call these tools directly.
 
 ### Quick start
 
+Create `wa.config.mjs`:
+
+```js
+export default {
+  apiKey: process.env.WA_API_KEY,
+  port: 8080,
+  mcp: {
+    enabled: true,
+    path: '/mcp',
+    exposeToolsMeta: true,
+  },
+};
+```
+
+Then start the v5 Easy API from the same directory:
+
 ```bash
-npx @open-wa/wa-automate --port 8080 --api-key "your-secure-key" --mcp
+WA_API_KEY="your-secure-key" npx @open-wa/wa-automate@latest --config ./wa.config.mjs
 ```
 
 Then point your MCP client at:
@@ -410,27 +416,29 @@ Add a new MCP server with the URL `http://localhost:8080/mcp` and include `X-API
 ### How it works
 
 - Uses the **Streamable HTTP** transport (single endpoint, no separate SSE/messages paths)
-- Tools are generated from the schema registry — same methods as the HTTP API
-- **API key required** on every request (same key as Easy API)
-- Session readiness is enforced — tools block until the session is fully connected
+- The schema registry generates the same tools as the HTTP API
+- **API key necessary** on every request (same key as Easy API)
+- The runtime blocks tools until the session connects
 - Dashboard: shows connection status, configuration copy-paste snippets (Claude/Cursor), and live tool details at `http://localhost:8080/dashboard/mcp`
 
-### Configuration
+### Configuration contract
 
-```json
+```js
 {
-  "apiKey": "your-secure-key",
-  "mcp": {
-    "enabled": true,
-    "path": "/mcp",
-    "exposeToolsMeta": true
-  }
+  apiKey: process.env.WA_API_KEY,
+  mcp: {
+    enabled: true,
+    path: '/mcp',
+    exposeToolsMeta: true,
+  },
 }
 ```
 
+The current v5 source does not parse `--mcp`. Enable MCP through `wa.config.*` as shown above.
+
 ### Security boundary
 
-MCP is an **Easy API-only** feature. It is not available through `createClient()`. The API key is mandatory — MCP refuses to start without one. Discovery (tool listing) and execution both require authentication.
+MCP is an **Easy API-only** feature. It is not available through `createClient()`. The API key is mandatory — MCP refuses to start without one. Discovery (tool listing) and execution require authentication.
 
 ### Without MCP
 
@@ -442,23 +450,23 @@ If you prefer HTTP, give your agent the Easy API docs surface instead:
 
 ## Migrating from v4 to v5
 
-The stable public line is still **v4.76.0**. Use it for production systems unless you are intentionally validating the v5 alpha.
+The npm `latest` tag now selects v5. Pin v4 explicitly while migrating an existing application:
 
 ```bash
 npx @open-wa/wa-automate@4.76.0
 ```
 
-If you are testing v5, treat it like a new runtime surface rather than a drop-in README copy-paste from v4:
+The v5 runtime has a different public surface, so update existing integrations deliberately:
 
 - start with Easy API and confirm `http://localhost:8080/api-docs/` works
 - test named sessions, auth, webhooks, and generated schemas in a separate environment
 - prefer SocketClient for remote consumers instead of embedding browser/runtime work everywhere
 - use `createClient` only when you need direct runtime ownership
-- expect some older v4 docs, examples, and flags to be reorganized or replaced during the alpha
+- replace old v4 examples and flags with the v5 config and CLI options documented here
 
 ## Documentation map
 
-The current docs in this repo are organized around real usage modes. Start with:
+The current docs organize information by usage mode. Start with:
 
 - **Easy API quick start**: https://openwa.dev/docs/getting-started/easy-api
 - **Custom code**: https://openwa.dev/docs/getting-started/custom-code
@@ -503,7 +511,7 @@ If you need help, paid support, or consulting:
 
 ## License
 
-[Hippocratic + Do Not Harm Version 1.0](./LICENSE.md)
+[Hippocratic + Do Not Harm Version 1.1](./LICENSE.md)
 
 ## Legal
 
@@ -511,9 +519,9 @@ This code is in no way affiliated with, authorized, maintained, sponsored, or en
 
 ## Cryptography notice
 
-This distribution includes cryptographic software. Depending on where you live, there may be restrictions on the import, possession, use, or re-export of encryption software. Check your local laws before using it. See [http://www.wassenaar.org/](http://www.wassenaar.org/) for more information.
+This distribution includes cryptographic software. Your country can restrict the import, possession, use, or re-export of encryption software. Examine your local laws before you use it. Refer to [http://www.wassenaar.org/](http://www.wassenaar.org/) for more information.
 
-The U.S. Government Department of Commerce, Bureau of Industry and Security (BIS), has classified this software as Export Commodity Control Number (ECCN) 5D002.C.1, which includes information security software using or performing cryptographic functions with asymmetric algorithms. The form and manner of this distribution makes it eligible for export under the License Exception ENC Technology Software Unrestricted (TSU) exception (see the BIS Export Administration Regulations, Section 740.13) for both object code and source code.
+The U.S. Government Department of Commerce, Bureau of Industry and Security (BIS), classifies this software as ECCN 5D002.C.1. This classification includes information security software that has cryptographic functions with asymmetric algorithms. This distribution is eligible for the License Exception ENC Technology Software Unrestricted (TSU) exception. Refer to Section 740.13 of the BIS Export Administration Regulations for object code and source code.
 
 [buymeacoffee-shield]: https://www.buymeacoffee.com/assets/img/guidelines/download-assets-sm-2.svg
 [buymeacoffee]: https://www.buymeacoffee.com/smashah

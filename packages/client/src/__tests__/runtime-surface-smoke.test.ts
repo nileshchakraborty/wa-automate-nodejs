@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HyperEmitter } from '@open-wa/hyperemitter';
-import { Client } from '../Client.js';
+import { Client } from '../Client';
 import type { OpenWAClient, OpenWAEventMap, STATE, Transport } from '@open-wa/core';
 
 function createTestClient() {
@@ -11,7 +11,7 @@ function createTestClient() {
     events,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
     session: {} as any,
-    plugins: {} as any,
+    plugins: { bindRuntime: vi.fn() } as any,
     config: {},
     registerFinalizationHook: vi.fn(() => () => undefined),
     start: vi.fn(),
@@ -25,6 +25,11 @@ function createTestClient() {
 
   const transport: Transport = {
     evaluate: vi.fn(),
+    setPortableMessageHandler: vi.fn((handler) => {
+      const listener = ({ message }: any) => handler(message);
+      events.on('message.received', listener);
+      return () => events.off('message.received', listener);
+    }),
   } as any;
 
   return new Client({ client: openwaClient, transport });
@@ -32,13 +37,6 @@ function createTestClient() {
 
 describe('Client runtime surface smoke coverage', () => {
   it.each([
-    ['sendFile', (client: Client) => client.sendFile('123@c.us' as any, 'data:text/plain;base64,QQ==' as any, 'file.txt')],
-    ['editMessage', (client: Client) => client.editMessage('msg-1' as any, 'updated')],
-    ['react', (client: Client) => client.react('msg-1' as any, '✅')],
-    ['sendFileFromUrl', (client: Client) => client.sendFileFromUrl('123@c.us' as any, 'https://example.com/file.txt', 'file.txt')],
-    ['setGroupTitle', (client: Client) => client.setGroupTitle('123@g.us' as any, 'new title')],
-    ['setGroupDescription', (client: Client) => client.setGroupDescription('123@g.us' as any, 'new description')],
-    ['getGroupInfo', (client: Client) => client.getGroupInfo('123@g.us' as any)],
     ['pinChat', (client: Client) => client.pinChat('123@c.us' as any)],
     ['unpinChat', (client: Client) => client.unpinChat('123@c.us' as any)],
     ['muteChat', (client: Client) => client.muteChat('123@c.us' as any)],

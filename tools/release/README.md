@@ -1,142 +1,137 @@
-# Release Tools
+# Release tools
 
-Scripts for testing and executing the `@open-wa` release pipeline.
+Development lands directly on `master`. Bumpy manages package bump intent and versions; one `master` → `release` PR starts publication. No development, Bumpy version, or version-sync PR is required.
 
-## Quick Start: Dry Run
+## Release flow
 
-Test the entire release pipeline locally before going live on npmjs and GitHub Packages:
+1. Push the changes and `.bumpy/*.md` bump files to `master`. Use gitmoji Conventional Commit messages and append a final `Refs #123` paragraph whenever the work relates to an issue. Use `Fixes #123` only when the commit resolves it. Supporting documentation and follow-up commits need the reference too; a reference on the PR alone is insufficient.
+2. Comment `/release` on an issue as an owner/member, or run `gh workflow run comment-run.yml --ref master`. **Prepare release** consumes the bumps, commits versions and package changelogs to `master`, and opens or updates the single promotion PR. The issue receives its link. Further bump files pushed while that PR is open refresh its versions. If there are no pending package versions, no new release PR is created.
+3. Merge the promotion PR normally. **Release** builds and submits unpublished packages to npm with trusted publishing, publishes missing GitHub Packages, and publishes the aggregate GitHub release against the exact source commit. Any bumps arriving just before the merge are consumed directly on `release`, with a normal merge back to `master`; this never creates a second PR. Preserve branch history and protections; do not force-push.
+4. **Release availability** runs separately. It deploys documentation from the release tag and tracks that exact deployment. It checks each public package's version manifest, dist-tag and tarball until npm validation finishes, for up to two hours. A newer stable dist-tag can supersede the release being tracked without making the older version uninstallable. Existing Bumpy package release metadata is reconciled to successful publication while retaining its changelog.
+5. **Release notes** generates the grouped commit changelog from the immutable release tag and updates the GitHub release. After availability and documentation are confirmed, it posts one concise Discord announcement and updates the originating issue with completion. Reruns edit the saved Discord message rather than starting another announcement.
+
+All 36 public packages share one fixed release version, including Jev and the runtime adapters. Preparation aligns a newly added member with the highest stable version in its group. Stable packages use npm's `latest` tag. `release-state.json`, attached to the aggregate GitHub release, records source SHA, package versions, publication progress, docs run, and the confirmed Discord message ID. It contains no credentials.
+
+Accepted npm uploads can remain unavailable during npm's automated validation. An E409 for a previously staged version is tracked as pending availability, not uploaded again. The package publishing action does not wait for validation, documentation, release notes or Discord. A failure in a follow-up action does not undo package publication or require another release PR.
+
+## Commit-based release notes
+
+Use this commit format:
+
+```text
+🐛 fix(session): recover unusable sessions with fresh QR pairing
+
+Refs #3550
+```
+
+For issues in another repository, append the full issue URL. Include all known relevant issues, and don't invent references for unrelated work.
+
+The generator reads original commit messages between the preceding aggregate tag and the release tag. It omits merge commits and version/promotion/sync bookkeeping, deduplicates repeated descriptions, groups by change type and concern, and sorts concerns and entries newest first. Plain section headings carry no emoji; each entry retains its gitmoji, an inline concern, a commit link, and confirmed issue links. PR numbers and links are omitted. Breaking-change paragraphs from commit messages are retained.
+
+```markdown
+## Fixes
+
+- 🐛 **API:** Open the dashboard from the server root. ([COMMIT](COMMIT_URL))
+- 🐛 **Sessions:** Recover unusable sessions with fresh QR pairing. ([COMMIT](COMMIT_URL) · [#3550](https://github.com/open-wa/wa-automate-nodejs/issues/3550))
+```
+
+`generate-notes.ts` writes `RELEASE_BODY.md` and `release-notes-detailed.md`. It uses Node built-ins and `gh`, with no dependency installation, browser, AI provider or CMS credential. AI-written articles, blog posts, CMS publication and release artwork are reserved for significant releases authored directly with Mohammed. The existing image and editorial tools remain available for that work; they are not part of automatic publishing.
+
+To time the actual generator against the latest 100 commits, including issue lookups, pipe the git records directly into it:
 
 ```bash
-# Run the full dry run (build → publish to Verdaccio → generate notes → verify)
-./tools/release/dry-run.sh
-
-# Keep Verdaccio running to browse published packages
-./tools/release/dry-run.sh --keep-verdaccio
-
-# Skip build (use existing dist/ output)
-./tools/release/dry-run.sh --skip-build
-
-# Specify a different port
-./tools/release/dry-run.sh --port 4874
+git log -100 --format='%H%x1f%P%x1f%aI%x1f%B%x1e' | /usr/bin/time -p node tools/release/generate-notes.ts --stdin --output -
 ```
 
-Then open http://localhost:4873 to browse the locally published packages.
+This prints Markdown to stdout without writing repository files or publishing anything. Use `--output /tmp/openwa-last100.md` to save the unedited output instead. Merge commits are removed after selecting the 100-commit window.
 
-## Scripts
-
-### `dry-run.sh`
-
-Full pipeline orchestrator. Starts a local Verdaccio registry, builds all packages, publishes them, generates release notes + image, and runs a test install to verify everything resolves correctly.
-
-**Options:**
-
-| Flag               | Description                                    |
-| ------------------ | ---------------------------------------------- |
-| `--skip-build`     | Skip `turbo build` (use existing `dist/`)      |
-| `--skip-image`     | Skip release image generation                  |
-| `--skip-install`   | Skip test-install verification                 |
-| `--keep-verdaccio` | Keep Verdaccio running after the script exits  |
-| `--port PORT`      | Verdaccio port (default: 4873)                 |
-| `--bump TYPE`      | Version bump type: `patch` / `minor` / `major` |
-
-### `publish-packages.sh`
-
-CI publish wrapper used by `pnpm publish-packages`. It builds once with `pnpm build`, then publishes changed packages through Changesets alpha prerelease mode. The script never edits the project `.npmrc`; it creates temporary npmrc files and deletes them on exit.
-
-Publish order:
-
-1. npmjs, when `NPM_TOKEN` is set.
-2. GitHub Packages, when `GITHUB_TOKEN` is set.
-
-GitHub Packages uses the `@open-wa` scope registry (`https://npm.pkg.github.com`) and `--no-git-tag` when the installed Changesets CLI supports it, so the second registry publish does not try to create the same git tags again. This repo is already in Changesets pre mode with the `alpha` tag, so no one needs to switch registry settings by hand. The installed Changesets CLI rejects an explicit `--tag alpha` while pre mode is active; the script lets `.changeset/pre.json` provide the alpha tag in that case.
+## Independent actions and reruns
 
 ```bash
-pnpm publish-packages
+# Prepare the single release PR.
+gh workflow run comment-run.yml --ref master
+
+# Retry an interrupted package publisher on the release branch.
+# Persisted npm submission state prevents a duplicate upload.
+gh workflow run release.yml --ref release
+
+# Recheck availability and the existing documentation deployment.
+gh workflow run release-status.yml --ref master -f version=5.6.3
+
+# Regenerate notes and update the saved announcement, without publishing packages.
+gh workflow run release-notes.yml --ref release -f version=5.6.3
 ```
 
-### `generate-notes.ts`
+These version examples apply to a release created by this setup. For a failed documentation deployment, rerun its recorded action run with `gh run rerun RUN_ID --failed`, then rerun **Release availability**. The recorded docs run must succeed before the completion announcement claims that deployment is done. An availability timeout is resumed by rerunning availability; it is not a reason to republish accepted npm versions.
 
-AI-powered release notes generator. Reads git history and per-package changelogs, then produces a polished Markdown summary.
+New releases announce normally. Include `[skip-discord]` in the promotion PR's merge commit message when the authorized release excludes announcements. No extra approval step is added. Discord failures affect only the release notes action; its confirmed message ID is saved immediately so a rerun updates it.
+
+## Publishing access
+
+Existing packages use npm Trusted Publisher connections to `open-wa/wa-automate-nodejs`, workflow `release.yml`, environment `Release`. The publisher grants `id-token: write` and uses npm 11 on Node 24. A new npm package must first be created and have its Trusted Publisher configured before it can use OIDC. GitHub Packages uses the built-in `GITHUB_TOKEN`.
+
+## New package onboarding
+
+Use the onboarding command when adding public workspace packages. Release preparation also lists unregistered names and puts the exact command in the promotion PR. Discovery is informational and adds no release approval or staging gate. Normal `release.yml` publishing remains direct OIDC and never receives an onboarding token.
 
 ```bash
-# With AI summary (requires GOOGLE_API_KEY)
-GOOGLE_API_KEY=xxx pnpm tsx tools/release/generate-notes.ts
+# Discover new npm names without npm authentication or publication changes.
+pnpm packages:onboard --status
 
-# Without AI (structured template)
-pnpm tsx tools/release/generate-notes.ts
+# Create new names, configure package-specific OIDC, and approve first versions.
+# With no names, discover new packages and resume incomplete onboarding.
+pnpm packages:onboard @open-wa/integration-voxtral
 
-# Specify version
-pnpm tsx tools/release/generate-notes.ts --version 5.0.0-alpha.2
+# Reuse an already built publication artifact.
+pnpm packages:onboard @open-wa/integration-voxtral --tarball /absolute/path/package.tgz
+
+# Complete a batch from already prepared pnpm tarballs, without rebuilding
+# between maintainer authentication and trust configuration.
+pnpm packages:onboard @open-wa/create @open-wa/integration-voxtral --artifacts /absolute/path/artifacts
+
+# A CI job with package-creation credentials can stage only; finish locally.
+pnpm packages:onboard @open-wa/integration-voxtral --stage-only
+
+# If fixes supersede a staged first version, retain it without approving it.
+# Configure the registered names so the newer version can publish with OIDC.
+pnpm packages:onboard @open-wa/create @open-wa/integration-voxtral --trust-only
 ```
 
-**Output:** `RELEASE_BODY.md` (for GitHub Release) and `release-notes-detailed.md` (full commit log).
+Run from an installed workspace with Node 22.21.1+ and npm 11.15+. The interactive command opens npm's maintainer sign-in when local authentication has expired or is missing; `--stage-only` never starts interactive login. You can also authenticate in advance using `npm login --registry=https://registry.npmjs.org`. Credentials must allow creating packages in the `@open-wa` scope. A granular token's **Organizations** permissions only manage organization settings, teams and users; its **Packages and scopes** permissions control publication. Stage-only CI can use its configured npm credential; use a maintainer session for the interactive completion. Tokens and npmrc files never belong in Git.
 
-### `discord-notify.ts`
+The command discovers public workspace packages and builds/packs only their first publication artifacts. `--tarball` accepts an artifact matching the selected package and version. `--artifacts` accepts a batch directory containing the standard `pnpm pack` filenames, such as `open-wa-create-5.9.0.tgz`; each artifact's manifest and hash are checked before staging or approval. It stages absent package names, configures trust for this repository's `release.yml` and `Release` environment with `--allow-publish`, then approves the first staged versions. Existing, different trust settings are reported and left unchanged. npm requires maintainer 2FA for trust setup and initial approval; subsequent regular releases use OIDC without these onboarding steps. During trust configuration, npm offers a five-minute 2FA window for batching packages.
 
-Posts a rich Discord embed with version info, highlights, and release image.
+Progress, stage IDs, artifact hashes and timestamps are saved under the ignored `.open-wa/package-onboarding/` directory. The command reconciles pending npm stages on every run and reuses matching stages after interruption. It does not re-upload accepted artifacts, approve a different saved artifact, or treat a registry/auth failure as a missing package. Preserve this directory until onboarding completes. When finishing a CI-created stage on another machine, download its publication artifact and pass `--tarball` so the command can confirm the staged hash before approval. npm can delay public metadata after approval; use the existing release availability workflow for manifest, tarball and dist-tag tracking.
+
+`--trust-only` requires explicit, already registered package names. It configures and confirms direct OIDC trust, records onboarding completion, and preserves every saved stage ID, version and artifact hash without uploading or approving a version. Use it when an initial staged artifact has been superseded by fixes: publish the newer version through the normal promotion workflow. npm permits normal publication while older stages are pending, but an already staged version cannot be uploaded again. A new-name staging placeholder such as `0.0.0-stage` is not the released package; `latest` becomes usable after real-version publication. Interactive trust inspection uses the macOS/Linux `script` utility to preserve npm's terminal-based 2FA. Leave npm's browser setting enabled for its JSON authentication flow so its verification page can open.
+
+Sources: [npm stage](https://docs.npmjs.com/cli/v12/commands/npm-stage/), [npm trust and bulk configuration](https://docs.npmjs.com/cli/v12/commands/npm-trust/), [new-package staging](https://github.blog/changelog/2026-10-02-npm-staged-publishing-now-supports-creating-new-packages/), [token permissions](https://docs.npmjs.com/creating-and-viewing-access-tokens/).
+
+## Release credentials
+
+Keep `DISCORD_WEBHOOK_URL` in the repository or `Release` environment secrets. Documentation retains the existing `Docs` environment and its Cloudflare credentials. Preparation has no npm credentials. Notes and availability use only Node and `gh`; only the announcement step receives the Discord secret.
+
+The built-in `GITHUB_TOKEN` does not trigger push/release workflows for its own changes. The publisher explicitly dispatches availability; availability explicitly dispatches docs and notes on `release`, retaining the existing environment branch permissions. Their source checkout uses the immutable version tag; notes tooling comes from `master`. Merging the promotion PR triggers the publisher normally.
+
+## Local commands
 
 ```bash
-DISCORD_WEBHOOK_URL=xxx pnpm tsx tools/release/discord-notify.ts --version 5.0.0-alpha.2
+pnpm bump                         # create a bump file
+pnpm exec bumpy status            # inspect pending bumps
+pnpm version-packages             # consume bump files locally
+pnpm publish-packages             # publish unpublished versions locally
 ```
 
-### `ensure-changeset.ts`
+`publish-github-packages.sh` reconciles public workspace versions, skipping existing versions and building/packing missing packages with pnpm. `publish-packages-local.sh` is intentionally gitignored and must not be committed.
 
-Auto-creates a changeset file if none exists. Used by the CI release workflow to auto-generate changesets based on PR labels (`bump:major`, `bump:minor`, or default `patch`).
+[gh-signoff](https://github.com/basecamp/gh-signoff) remains optional for recording checks Mohammed requested and actually performed. It does not execute checks or speed up npm validation. Do not install its required-status ruleset or make it a release requirement.
 
-```bash
-pnpm tsx tools/release/ensure-changeset.ts --bump minor
+### Complete an existing release after version alignment
+
+When lower-version packages must join an already published aggregate version, align their manifests and changelogs on master, promote the normal master → release PR, then run:
+
+```sh
+gh workflow run release.yml --ref release -f align_versions=true
 ```
 
-## CI/CD Workflows
-
-### Release (`release.yml`)
-
-Triggered on push to the `release` branch. Flow:
-
-1. Detect version bump from merged PR labels (`bump:major`, `bump:minor`, or default `patch`)
-2. Auto-create changeset if none exists
-3. Run `changesets/action` to version and dual-publish to npmjs and GitHub Packages through `pnpm publish-packages`
-4. Generate AI release notes (Gemini)
-5. Generate release image (Puppeteer)
-6. Create GitHub Release with notes + image
-7. Post to Discord
-
-**Required secrets and permissions:**
-
-- `NPM_TOKEN` — npmjs publish token with write access to `@open-wa/*`
-- `GITHUB_TOKEN` — built in to GitHub Actions; used for GitHub Packages
-- `packages: write` — required workflow permission for GitHub Packages publish
-- `GOOGLE_API_KEY` — Gemini API key for release notes
-- `DISCORD_WEBHOOK_URL` — Discord webhook for notifications
-
-### PR Docs Check (`pr-docs-check.yml`)
-
-Runs on PRs targeting `release`. Posts a checklist comment checking:
-
-- Changeset presence
-- Version bump label
-- README/description/exports for changed packages
-
-## Version Strategy
-
-All `@open-wa/*` packages are in a **fixed version group** (see `.changeset/config.json`). This means:
-
-- **Every release bumps ALL packages** to the same version
-- Users always know what works with what based on semver
-- PR labels control the bump type:
-  - No label → `patch` (default)
-  - `bump:minor` → `minor`
-  - `bump:major` → `major`
-
-## Branch Strategy
-
-```
-main ───────────────────────── (latest development)
-           \
-            └──── release ──── (triggers CI release pipeline)
-```
-
-1. All development happens on `main`
-2. When ready to release, merge `main` → `release` via PR
-3. Add `bump:minor` or `bump:major` label to the PR if needed
-4. Merge triggers the release workflow; `pnpm publish-packages` handles npmjs and GitHub Packages without manual registry switching
+This records the follow-up source SHA and previous package versions in `release-state.json`, publishes only missing versions through Bumpy/OIDC, and resumes availability tracking. The original aggregate tag and already published npm artifacts are retained. Repeating the completed alignment is a no-op.

@@ -10,6 +10,8 @@ import { FeedbackCard } from '@/components/feedback-card';
 import { DocsPageHeader } from '@/components/docs-page-header';
 import {
   getAbsoluteDocsUrl,
+  getDocsDocumentTitle,
+  getDocsPageSchema,
   getDocsSocialMeta,
   getOgDescription,
   getPageImage,
@@ -20,7 +22,7 @@ import { DocsShell } from './-shell';
 const loader = createServerFn({
   method: 'GET',
 })
-  .inputValidator((slugs: string[]) => slugs)
+  .validator((slugs: string[]) => slugs)
   .handler(async ({ data: slugs }) => {
     const { source } = await import('@/lib/source');
 
@@ -29,15 +31,33 @@ const loader = createServerFn({
       if (!page) throw notFound();
 
       const image = getPageImage(slugs);
+      const imageUrl = getAbsoluteDocsUrl(image.url);
       const description = getOgDescription(page.data);
+      const canonical = getAbsoluteDocsUrl(page.data.release ? `/changelog/${page.data.release.version}` : page.url);
+      const breadcrumbs = [{ name: 'Docs', url: getAbsoluteDocsUrl('/docs') }];
+      for (let depth = 1; depth < slugs.length; depth++) {
+        const parent = source.getPage(slugs.slice(0, depth));
+        if (parent) breadcrumbs.push({ name: parent.data.title, url: getAbsoluteDocsUrl(parent.url) });
+      }
+      if (slugs.length > 0) breadcrumbs.push({ name: page.data.title, url: canonical });
 
       return {
         path: page.path,
+        canonical,
         meta: getDocsSocialMeta({
-          title: page.data.title,
+          title: getDocsDocumentTitle(page.data),
           description,
-          imageUrl: getAbsoluteDocsUrl(image.url),
+          imageUrl,
         }),
+        schema: JSON.stringify(
+          getDocsPageSchema({
+            title: page.data.title,
+            description,
+            url: canonical,
+            imageUrl,
+            breadcrumbs,
+          }),
+        ),
         pageTree: await source.serializePageTree(source.pageTree),
       };
     } catch (err: unknown) {
@@ -57,6 +77,8 @@ export const Route = createFileRoute('/docs/$')({
   head: ({ loaderData }) => {
     return {
       meta: loaderData?.meta ?? [{ title: SITE_NAME }],
+      links: loaderData?.canonical ? [{ rel: 'canonical', href: loaderData.canonical }] : [],
+      scripts: loaderData?.schema ? [{ type: 'application/ld+json', children: loaderData.schema }] : [],
     };
   },
   component: Page,
@@ -66,8 +88,17 @@ const clientLoader = browserCollections.docs.createClientLoader<{
   pagePath: string;
 }>({
   component({ toc, frontmatter, default: MDX }, { pagePath }) {
+    const normalizedPagePath = pagePath.replace(/^\/+/, '').replace(/\.mdx$/, '');
+    const isCompactClientReference = normalizedPagePath === 'reference/client/client';
+
     return (
-      <DocsPage toc={toc} breadcrumb={{ enabled: false }}>
+      <DocsPage
+        full={isCompactClientReference}
+        className={isCompactClientReference ? 'docs-reference-page' : 'docs-guide-page'}
+        toc={isCompactClientReference ? [] : toc.filter((item) => item.depth > 1)}
+        tableOfContent={{ enabled: !isCompactClientReference }}
+        breadcrumb={{ enabled: false }}
+      >
         <DocsPageHeader
           title={frontmatter.title}
           description={frontmatter.description}
@@ -99,8 +130,8 @@ function Page() {
 
   return (
     <DocsShell loaderData={data}>
-      {data.path === 'index' ? (
-        <DocsHomepage />
+      {data.path.replace(/\.mdx$/, '') === 'index' ? (
+        <DocsPage full tableOfContent={{ enabled: false }} breadcrumb={{ enabled: false }} className="docs-hub-page"><DocsHomepage /></DocsPage>
       ) : (
         <Content pagePath={data.path} />
       )}

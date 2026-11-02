@@ -1,8 +1,6 @@
+import { disposeClientStickers } from './stickers';
 import type { HyperEmitter } from '@open-wa/hyperemitter';
 import type { Logger } from '@open-wa/logger';
-import * as fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import path from 'node:path';
 import type {
   OpenWAClient,
   OpenWAEventMap,
@@ -10,34 +8,49 @@ import type {
   SessionManager,
   PluginHost,
   STATE,
+  SessionRefreshOptions,
+  SessionRefreshResult,
+  SessionRefreshSnapshot,
 } from '@open-wa/core';
 import type {
   ChatId,
+  GroupId,
   ContactId,
   MessageId,
   Message,
   Chat,
   Contact,
+  InteractiveResponse,
+  FormResponse,
+  WhatsAppEvent,
+  EventResponse,
+  ParticipantChange,
 } from '@open-wa/schema';
+import { groupIdParam } from '@open-wa/schema';
 import {
   MessageCollector,
-  MessageCollectorEvents,
   MessageCollectorOptions,
   AwaitMessagesOptions,
   awaitMessages,
   Collection,
   CollectorFilter,
 } from '@open-wa/domain';
-import { ListenerManager, type ListenerHandle } from './events/index.js';
-import { throwUnsupportedListener } from './runtimeSurface.js';
+import { ListenerManager, type ListenerHandle } from './events/index';
+import { throwUnsupportedListener } from './runtimeSurface';
+import { hydrateCall } from './calls';
+import { normalizeCallMedia } from '@open-wa/schema';
+import type { Call, CallActionResult, CallCapabilities, CallIdentity, CallMediaOptions, AudioInput, AudioOutput, VideoInput } from '@open-wa/schema';
 import type { QueueOptions } from '@open-wa/schema';
 
-import { messagingMethods, type MessagingMethods } from './methods/messaging.js';
-import { mediaMethods, type MediaMethods } from './methods/media.js';
-import { groupMethods, type GroupMethods } from './methods/groups.js';
-import { chatMethods, type ChatMethods } from './methods/chats.js';
-import { contactMethods, type ContactMethods } from './methods/contacts.js';
-import { utilitiesMethods, type UtilitiesMethods } from './methods/utilities.js';
+import { interactiveMethods, type InteractiveMethods } from './methods/interactive';
+import { messagingMethods, type MessagingMethods } from './methods/messaging';
+import { mediaMethods, type MediaMethods } from './methods/media';
+import { statusMethods, type StatusMethods } from './methods/status';
+import { groupMethods, type GroupMethods } from './methods/groups';
+import { chatMethods, type ChatMethods } from './methods/chats';
+import { contactMethods, type ContactMethods } from './methods/contacts';
+import { utilitiesMethods, type UtilitiesMethods } from './methods/utilities';
+import { whatsappEventMethods, type WhatsAppEventMethods } from './methods/whatsapp-events';
 
 /**
  * Configuration for creating a WhatsApp Client.
@@ -88,7 +101,7 @@ export type EvaluateFn = <Arg, Ret>(
  * client.onMessage(msg => console.log(msg));
  * ```
  */
-export class Client implements MessagingMethods, MediaMethods, GroupMethods, ChatMethods, ContactMethods, UtilitiesMethods {
+export class Client implements InteractiveMethods, MessagingMethods, MediaMethods, StatusMethods, GroupMethods, ChatMethods, ContactMethods, UtilitiesMethods, WhatsAppEventMethods {
   private readonly _client: OpenWAClient;
   private readonly _transport: Transport;
   private readonly _listenerManager: ListenerManager;
@@ -104,15 +117,26 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
     this._listenerManager = new ListenerManager({
       sessionId: config.client.sessionId,
       events: config.client.events,
+      observability: config.client.observability,
     });
     
     // Bind method modules
     this._bindMethods(messagingMethods, this);
+    this._bindMethods(interactiveMethods, this);
     this._bindMethods(mediaMethods, this);
+    this._bindMethods(statusMethods, this);
     this._bindMethods(groupMethods, this);
     this._bindMethods(chatMethods, this);
     this._bindMethods(contactMethods, this);
     this._bindMethods(utilitiesMethods, this);
+    this._bindMethods(whatsappEventMethods, this);
+
+    this._client.plugins.bindRuntime(async (method, args) => {
+      if (method.startsWith('_') || method === 'constructor') throw new Error('Invalid host method.');
+      const fn = (this as unknown as Record<string, unknown>)[method];
+      if (typeof fn !== 'function') throw new Error(`Host method ${method} is unavailable.`);
+      return Reflect.apply(fn, this, args);
+    });
 
     this._client.registerFinalizationHook(() => this.loaded());
   }
@@ -174,11 +198,19 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
   async start(): Promise<void> {
     return this._client.start();
   }
+
+  /** Rebuild public and licensed patches. Warning: messages may be missed during the page reload. */
+  refresh(options?: SessionRefreshOptions): Promise<SessionRefreshResult> { return this._client.refresh(options); }
+  /** Start a background refresh. Warning: messages may be missed during the page reload. */
+  requestRefresh(options?: SessionRefreshOptions): { operationId: string } { return this._client.requestRefresh(options); }
+  getRefreshStatus(): Promise<SessionRefreshSnapshot> { return this._client.getRefreshStatus(); }
   
   /**
    * Stop the client gracefully.
    */
   async stop(reason?: string): Promise<void> {
+    await disposeClientStickers(this).catch(() => {});
+    await this._listenerManager.dispose();
     return this._client.stop(reason);
   }
   
@@ -222,6 +254,15 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
   ): Promise<Ret> {
     return this._transport.evaluate(fn, arg);
   }
+
+  /** Execute an explicitly supplied function expression inside this chat's configured sandbox. */
+  async executeInChatSandbox<T = unknown>(chatId: string, source: string, input?: unknown): Promise<T> {
+    return this._client.executeInChatSandbox<T>(chatId, source, input);
+  }
+
+  async closeChatSandbox(chatId: string): Promise<void> {
+    await this._client.closeChatSandbox(chatId);
+  }
   
   // ─────────────────────────────────────────────────────────────────
   // Message Collectors (Discord.js style)
@@ -255,7 +296,7 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
       this.sessionId,
       chatId,
       filter,
-      this.events as unknown as HyperEmitter<MessageCollectorEvents>,
+      this.events as unknown as ConstructorParameters<typeof MessageCollector>[3],
       collectorOptions
     );
   }
@@ -284,7 +325,7 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
     return awaitMessages(
       this.sessionId,
       chatId,
-      this.events as unknown as HyperEmitter<MessageCollectorEvents>,
+      this.events as unknown as Parameters<typeof awaitMessages>[2],
       filter,
       awaitOptions
     );
@@ -295,8 +336,31 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
   // ─────────────────────────────────────────────────────────────────
   
   /**
-   * Listen for all incoming messages.
+   * Listen for structured interactive selections and submissions.
    */
+  onInteractiveResponse(callback: (response: InteractiveResponse) => void | Promise<void>, options?: QueueOptions): ListenerHandle {
+    return this._listenerManager.on('interactiveResponse', callback, options);
+  }
+
+  /** Listen only for form submissions from the interactive response stream. */
+  onFormResponse(callback: (response: FormResponse) => void | Promise<void>, options?: QueueOptions): ListenerHandle {
+    return this._listenerManager.on('formResponse', callback, options);
+  }
+
+  /** Decrypted votes from the synced store; history hydration can emit votes too. */
+  onPollVote(callback: (vote: import('@open-wa/schema').PollVote) => void | Promise<void>, options?: QueueOptions): ListenerHandle {
+    return this._listenerManager.on('pollVote', callback, options);
+  }
+
+  onEvent(callback: (event: WhatsAppEvent) => void | Promise<void>, options?: QueueOptions): ListenerHandle {
+    return this._listenerManager.on('event', callback, options);
+  }
+
+  onEventResponse(callback: (response: EventResponse) => void | Promise<void>, options?: QueueOptions): ListenerHandle {
+    return this._listenerManager.on('eventResponse', callback, options);
+  }
+
+  /** Listen for all incoming messages. */
   onMessage(callback: (message: Message) => void | Promise<void>, options?: QueueOptions): ListenerHandle {
     return this._listenerManager.on('message', async (payload) => {
       await callback(payload);
@@ -306,9 +370,9 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
   /**
    * Listen for message acknowledgements (sent, delivered, read).
    */
-  onAck(callback: (ack: { messageId: MessageId; ack: number }) => void | Promise<void>, options?: QueueOptions): ListenerHandle {
+  onAck(callback: (message: Message) => void | Promise<void>, options?: QueueOptions): ListenerHandle {
     return this._listenerManager.on('ack', async (payload) => {
-      await callback({ messageId: payload.id, ack: payload.ack });
+      await callback(payload);
     }, options);
   }
   
@@ -324,6 +388,28 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
   onAnyMessage(callback: (message: Message) => void | Promise<void>, options?: QueueOptions): ListenerHandle {
     return this._listenerManager.on('anyMessage', async (payload) => {
       await callback(payload);
+    }, options);
+  }
+
+  /** Listen to the existing participant-change patch for one group. */
+  onParticipantsChanged(
+    groupId: GroupId,
+    callback: (change: ParticipantChange) => void | boolean | Promise<void | boolean>,
+    options?: QueueOptions,
+  ): ListenerHandle {
+    const id = groupIdParam.parse(groupId);
+    return this._listenerManager.on('participantsChanged', async change => {
+      if (String(change.groupId) === String(id)) await callback(change);
+    }, options);
+  }
+
+  /** Listen to participant changes across the session's groups. */
+  onGlobalParticipantsChanged(
+    callback: (change: ParticipantChange) => void | boolean | Promise<void | boolean>,
+    options?: QueueOptions,
+  ): ListenerHandle {
+    return this._listenerManager.on('participantsChanged', async change => {
+      await callback(change);
     }, options);
   }
 
@@ -343,6 +429,35 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
   // Private helpers
   // ─────────────────────────────────────────────────────────────────
   
+  getCallCapabilities(): Promise<CallCapabilities> { return this._transport.calling.capabilities(); }
+  /** Access selected by the accepted licence payload; no capability preflight is required. */
+  async getLicenseFeatures(): Promise<import('@open-wa/schema').LicenseFeatures> { return this._transport.getLicenseFeatures(); }
+  /** Used by the bundled API's authenticated binary media route. */
+  getCallingService() { return this._transport.calling; }
+  async getActiveCall(): Promise<Call | null> {
+    const snapshot = await this._transport.calling.getActive();
+    return snapshot ? hydrateCall(snapshot, this) : null;
+  }
+  onIncomingCall(callback: (call: Call) => unknown, options?: QueueOptions): ListenerHandle {
+    this._transport.calling.logListenerAvailability();
+    return this._listenerManager.on('incomingCall', async snapshot => { await callback(hydrateCall(snapshot, this)); }, options);
+  }
+  onCallState(callback: (call: Call) => unknown, options?: QueueOptions): ListenerHandle {
+    this._transport.calling.logListenerAvailability();
+    return this._listenerManager.on('callState', async snapshot => { await callback(hydrateCall(snapshot, this)); }, options);
+  }
+  acceptCall(call: CallIdentity, media?: CallMediaOptions): Promise<CallActionResult> { return this._transport.calling.accept(call, media); }
+  startCall(to: string, microphone?: AudioInput | CallMediaOptions, speaker?: AudioOutput, camera?: VideoInput): Promise<CallActionResult> {
+    return this._transport.calling.start(to, normalizeCallMedia(microphone, speaker, camera));
+  }
+  rejectCall(call: CallIdentity): Promise<CallActionResult> { return this._transport.calling.control('reject', call); }
+  endCall(call: CallIdentity): Promise<CallActionResult> { return this._transport.calling.control('end', call); }
+  muteCall(call: CallIdentity, muted: boolean): Promise<CallActionResult> { return this._transport.calling.control('mute', call, muted); }
+  clearCallAudio(call: CallIdentity): Promise<CallActionResult> { return this._transport.calling.control('clear', call); }
+  setCallMedia(call: CallIdentity, media: CallMediaOptions): Promise<CallActionResult> { return this._transport.calling.replace(call, media); }
+  observeCallAudio(call: CallIdentity, speaker: AudioOutput): Promise<CallActionResult & { observerId?: string }> { return this._transport.calling.observeAudio(call, speaker); }
+  stopCallAudioObserver(call: CallIdentity, observerId: string): Promise<CallActionResult> { return this._transport.calling.stopObserver(call, observerId); }
+
   private _bindMethods<T extends object>(
     methods: (client: Client) => T,
     target: Client
@@ -356,11 +471,8 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
   }
 
   private async _runLoadedFinalization(): Promise<void> {
-    this.logger.info('client_loaded_waiting_for_sync', { sessionId: this.sessionId });
-    await this._waitForSessionLoaded();
-
     this.registerAllSimpleListenersOnEv();
-    this._phoneVersion = await this._capturePhoneVersion();
+    this._phoneVersion = await this._capturePhoneVersion().catch(() => undefined);
     this._installRetainedFinalizationHooks();
     this._loaded = true;
 
@@ -368,37 +480,6 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
       sessionId: this.sessionId,
       phoneVersion: this._phoneVersion ?? 'unknown',
     });
-  }
-
-  private async _waitForSessionLoaded(timeoutMs = 20_000, pollingMs = 50): Promise<void> {
-    const startedAt = Date.now();
-
-    while (Date.now() - startedAt <= timeoutMs) {
-      const loaded = await this._transport.evaluate(() => {
-        const root = globalThis as typeof globalThis & {
-          WAPI?: { isSessionLoaded?: () => boolean };
-          isSessionLoaded?: () => boolean;
-        };
-
-        if (typeof root.WAPI?.isSessionLoaded === 'function') {
-          return Boolean(root.WAPI.isSessionLoaded());
-        }
-
-        if (typeof root.isSessionLoaded === 'function') {
-          return Boolean(root.isSessionLoaded());
-        }
-
-        return false;
-      }, undefined);
-
-      if (loaded) {
-        return;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, pollingMs));
-    }
-
-    throw new Error('Timed out waiting for internal session sync to finish');
   }
 
   private registerAllSimpleListenersOnEv(): void {
@@ -426,9 +507,19 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
       return;
     }
 
+    this.events.on('session.state.changed', event => {
+      if (event.details?.next === 'STARTING' || event.details?.next === 'AUTHENTICATING') {
+        this._loaded = false;
+        this._loadedPromise = undefined;
+        this._phoneVersion = undefined;
+      }
+    });
+
     this.events.on('session.logout', () => {
       if (!this._logoutCleanupPromise) {
-        this._logoutCleanupPromise = this._runLogoutCleanup().finally(() => {
+        this._logoutCleanupPromise = this._runLogoutCleanup().catch(error => {
+          this.logger.error('session_logout_cleanup_failed', { error });
+        }).finally(() => {
           this._loaded = false;
           this._loadedPromise = undefined;
           this._phoneVersion = undefined;
@@ -441,94 +532,33 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
   }
 
   private async _runLogoutCleanup(): Promise<void> {
-    const { deleteSessionDataOnLogout = false, killClientOnLogout = false } = this._client.config;
-
-    if (!deleteSessionDataOnLogout && !killClientOnLogout) {
-      return;
-    }
-
-    await this._listenerManager.waitForQueuesToDrain();
-    await this._invalidateSessionData();
-
-    if (deleteSessionDataOnLogout) {
-      await this._deleteSessionData();
-    }
-
-    if (killClientOnLogout) {
-      this.logger.warn('client_logout_kill_requested', { sessionId: this.sessionId });
-      await this._client.stop('LOGGED_OUT');
-    }
+    if (this._client.config.killClientOnLogout) await this._client.stop('LOGGED_OUT');
   }
 
-  private async _invalidateSessionData(): Promise<void> {
-    const sessionDataPath = this._resolveSessionDataFilePath();
-
-    if (!sessionDataPath) {
-      return;
-    }
-
-    this.logger.info('logout_invalidate_session_data', {
-      sessionId: this.sessionId,
-      sessionDataPath,
-    });
-
-    await fs.writeFile(sessionDataPath, 'LOGGED OUT', 'utf8');
-  }
-
-  private async _deleteSessionData(): Promise<void> {
-    const sessionDataPath = this._resolveSessionDataFilePath();
-    if (sessionDataPath) {
-      this.logger.info('logout_delete_session_data', {
-        sessionId: this.sessionId,
-        sessionDataPath,
-      });
-      await fs.unlink(sessionDataPath);
-    }
-
-    const userDataDir = this._client.config.userDataDir;
-    if (userDataDir && existsSync(userDataDir)) {
-      this.logger.info('logout_delete_user_data_dir', {
-        sessionId: this.sessionId,
-        userDataDir,
-      });
-      await fs.rm(userDataDir, { force: true, recursive: true });
-    }
-  }
-
-  private _resolveSessionDataFilePath(): string | undefined {
-    const configuredPath = this._client.config.sessionDataPath ?? '';
-    const sessionFileName = `${this.sessionId}.data.json`;
-    const candidate = configuredPath.includes('.data.json')
-      ? path.resolve(process.cwd(), configuredPath)
-      : path.resolve(process.cwd(), configuredPath, sessionFileName);
-
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-
-    const mainPath = require?.main?.path ?? process?.mainModule?.path;
-    if (!mainPath) {
-      return undefined;
-    }
-
-    const alternate = configuredPath.includes('.data.json')
-      ? path.resolve(mainPath, configuredPath)
-      : path.resolve(mainPath, configuredPath, sessionFileName);
-
-    return existsSync(alternate) ? alternate : undefined;
-  }
-  
   // ─────────────────────────────────────────────────────────────────
   // Method declarations (implemented by bound modules)
   // These are filled in by _bindMethods at construction time.
   // ─────────────────────────────────────────────────────────────────
   
   // Messaging methods
+  declare sendInteractive: InteractiveMethods['sendInteractive'];
+  declare sendRawMessage: InteractiveMethods['sendRawMessage'];
   declare sendText: MessagingMethods['sendText'];
+  declare sendAlbum: MessagingMethods['sendAlbum'];
   declare sendImage: MessagingMethods['sendImage'];
   declare sendFile: MessagingMethods['sendFile'];
+  declare sendAudio: MessagingMethods['sendAudio'];
+  declare sendPtt: MessagingMethods['sendPtt'];
+  declare sendVideoAsGif: MessagingMethods['sendVideoAsGif'];
+  declare sendPoll: MessagingMethods['sendPoll'];
+  declare voteOnPoll: MessagingMethods['voteOnPoll'];
+  declare getPollResults: MessagingMethods['getPollResults'];
+  declare pinMessage: MessagingMethods['pinMessage'];
+  declare unpinMessage: MessagingMethods['unpinMessage'];
   declare sendLocation: MessagingMethods['sendLocation'];
   declare sendContact: MessagingMethods['sendContact'];
+  declare sendMultipleContacts: MessagingMethods['sendMultipleContacts'];
+  declare sendVCard: MessagingMethods['sendVCard'];
   declare sendSticker: MessagingMethods['sendSticker'];
   declare reply: MessagingMethods['reply'];
   declare forwardMessages: MessagingMethods['forwardMessages'];
@@ -537,9 +567,20 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
   declare react: MessagingMethods['react'];
   declare sendSeen: MessagingMethods['sendSeen'];
   declare getMessageById: MessagingMethods['getMessageById'];
+  declare sendEvent: WhatsAppEventMethods['sendEvent'];
+  declare getEvent: WhatsAppEventMethods['getEvent'];
+  declare getEvents: WhatsAppEventMethods['getEvents'];
+  declare getEventResponses: WhatsAppEventMethods['getEventResponses'];
+  declare editEvent: WhatsAppEventMethods['editEvent'];
+  declare cancelEvent: WhatsAppEventMethods['cancelEvent'];
+  declare respondToEvent: WhatsAppEventMethods['respondToEvent'];
+  declare getAlbumMessages: MessagingMethods['getAlbumMessages'];
   declare sendFileFromUrl: MediaMethods['sendFileFromUrl'];
   declare decryptMedia: MediaMethods['decryptMedia'];
   declare downloadMedia: MediaMethods['downloadMedia'];
+  declare postTextStatus: StatusMethods['postTextStatus'];
+  declare postImageStatus: StatusMethods['postImageStatus'];
+  declare postVideoStatus: StatusMethods['postVideoStatus'];
   
   // Group methods
   declare createGroup: GroupMethods['createGroup'];
@@ -552,6 +593,7 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
   declare setGroupIcon: GroupMethods['setGroupIcon'];
   declare getGroupInfo: GroupMethods['getGroupInfo'];
   declare getGroupMembers: GroupMethods['getGroupMembers'];
+  declare getGroupMembersId: GroupMethods['getGroupMembersId'];
   declare getGroupInviteLink: GroupMethods['getGroupInviteLink'];
   declare revokeGroupInviteLink: GroupMethods['revokeGroupInviteLink'];
   declare joinGroupViaLink: GroupMethods['joinGroupViaLink'];
@@ -575,6 +617,8 @@ export class Client implements MessagingMethods, MediaMethods, GroupMethods, Cha
   
   // Contact methods
   declare getContact: ContactMethods['getContact'];
+  declare requestPhoneNumber: ContactMethods['requestPhoneNumber'];
+  declare sharePhoneNumber: ContactMethods['sharePhoneNumber'];
   declare getAllContacts: ContactMethods['getAllContacts'];
   declare getContactById: ContactMethods['getContactById'];
   declare checkNumberStatus: ContactMethods['checkNumberStatus'];

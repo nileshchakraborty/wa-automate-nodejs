@@ -4,6 +4,11 @@
 
 
 
+export interface AcceptCallParams {
+  call: { generation: string; id: string; sessionId: string };
+  media?: { camera?: any; microphone?: any; onMediaFailure?: "end" | "keep-open"; speaker?: any; takeover?: boolean };
+}
+
 export interface AddLabelParams {
   /**
    * Label ID or name
@@ -67,6 +72,16 @@ export interface BlockContactParams {
   contactId: string;
 }
 
+export interface CancelEventParams {
+  /**
+   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
+   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
+   * @remarks Key aliases: 'id', 'msgId'
+   * @remarks Deprecated key aliases: 'msgId'
+   */
+  eventId: string;
+}
+
 export interface CheckNumberStatusParams {
   /**
    * Contact ID A WhatsApp contact JID Branded type: ContactId Pattern: ^\d+@c\.us$
@@ -83,6 +98,10 @@ export interface CheckReadReceiptsParams {
    * @remarks Key aliases: 'id'
    */
   contactId: string;
+}
+
+export interface ClearCallAudioParams {
+  call: { generation: string; id: string; sessionId: string };
 }
 
 export interface ClearChatParams {
@@ -111,7 +130,7 @@ export interface DecryptMediaParams {
   /**
    * Message object containing media
    */
-  message: { ack: any; author: any; body: any; broadcast: any; caption: any; chat: any; chatId: any; clientUrl: any; content: any; deprecatedMms3Url: any; from: any; fromMe: any; id: any; invis: any; isForwarded: any; isGroupMsg: any; isMedia: any; isMMS: any; isNewMsg: any; isNotification: any; isPSA: any; isQuotedMsgAvailable: any; labels: any; mentionedJidList: any; notifyName: any; quotedMsg: any; quotedMsgObj: any; recvFresh: any; self: any; sender: any; senderId: any; star: any; t: any; timestamp: any; to: any; type: any; };
+  message: { ack: -1 | 0 | 1 | 2 | 3 | 4; associationType?: string; author?: string; body: string; broadcast?: boolean; caption?: string; chat: { ack?: any; contact: { formattedName?: string; id: string; isBusiness?: boolean; isEnterprise?: boolean; isMe?: boolean; isMyContact?: boolean; isOnline?: boolean; isPSA?: boolean; isUser?: boolean; isWAContact?: boolean; labels?: string[]; lastSeen?: number; msgs?: any[]; name?: string; profilePicThumbObj?: { eurl?: string; id?: string; img?: string; imgFull?: string; tag?: string }; pushname?: string; shortName?: string; statusMute?: boolean; type?: string; verifiedLevel?: number; verifiedName?: string }; formattedTitle?: string; groupMetadata?: { announce?: boolean; creation: number; desc?: string; descOwner?: string; descTime?: number; id: string; owner?: string; participants: { id: string; isAdmin: boolean; isSuperAdmin?: boolean }[]; restrict?: boolean; subject: string }; id: string; isGroup: boolean; isReadOnly?: boolean; lastReceivedKey?: any; msgs?: any[]; muteExpiration?: number; name?: string; notSpam?: boolean; pin?: number; presence?: object; t?: number; unreadCount?: number }; chatId: string; clientUrl?: string; content: string; deprecatedMms3Url?: string; event?: { chatId: string; creatorId: string; description?: string; endTime?: number; extraGuestsAllowed?: boolean; fromMe: boolean; id: string; isCanceled: boolean; isScheduledCall?: boolean; joinLink?: string; location?: { latitude?: number | "Infinity" | "-Infinity" | "NaN"; longitude?: number | "Infinity" | "-Infinity" | "NaN"; name?: string }; name: string; startTime: number; timestamp: number }; expectedImageCount?: number; expectedVideoCount?: number; from: string; fromMe: boolean; id: string; invis?: boolean; isForwarded?: boolean; isGif?: boolean; isGroupMsg: boolean; isMedia: boolean; isMMS?: boolean; isNewMsg?: boolean; isNotification: boolean; isPSA?: boolean; isQuotedMsgAvailable: boolean; labels?: string[]; mentionedJidList?: string[]; notifyName?: string; parentMsgKey?: string; quotedMsg?: any; quotedMsgObj?: any; recvFresh?: boolean; self: "in" | "out"; sender: { formattedName?: string; id: string; isBusiness?: boolean; isEnterprise?: boolean; isMe?: boolean; isMyContact?: boolean; isOnline?: boolean; isPSA?: boolean; isUser?: boolean; isWAContact?: boolean; labels?: string[]; lastSeen?: number; msgs?: any[]; name?: string; profilePicThumbObj?: { eurl?: string; id?: string; img?: string; imgFull?: string; tag?: string }; pushname?: string; shortName?: string; statusMute?: boolean; type?: string; verifiedLevel?: number; verifiedName?: string }; senderId?: string; star?: boolean; t: number; timestamp: number; to: string; type: "chat" | "audio" | "ptt" | "image" | "video" | "album" | "event_creation" | "event_response" | "document" | "sticker" | "location" | "vcard" | "multi_vcard" | "revoked" | "order" | "buttons_response" | "list_response" | "unknown" };
 }
 
 export interface DeleteChatParams {
@@ -139,7 +158,7 @@ export interface DeleteMessageParams {
   /**
    * Delete only locally
    */
-  onlyLocal: boolean;
+  onlyLocal?: boolean;
 }
 
 export interface DeleteStatusParams {
@@ -169,11 +188,43 @@ export interface DownloadMediaParams {
   /**
    * Message object containing media
    */
-  message: { ack: any; author: any; body: any; broadcast: any; caption: any; chat: any; chatId: any; clientUrl: any; content: any; deprecatedMms3Url: any; from: any; fromMe: any; id: any; invis: any; isForwarded: any; isGroupMsg: any; isMedia: any; isMMS: any; isNewMsg: any; isNotification: any; isPSA: any; isQuotedMsgAvailable: any; labels: any; mentionedJidList: any; notifyName: any; quotedMsg: any; quotedMsgObj: any; recvFresh: any; self: any; sender: any; senderId: any; star: any; t: any; timestamp: any; to: any; type: any; };
+  message: { ack: -1 | 0 | 1 | 2 | 3 | 4; associationType?: string; author?: string; body: string; broadcast?: boolean; caption?: string; chat: { ack?: any; contact: { formattedName?: string; id: string; isBusiness?: boolean; isEnterprise?: boolean; isMe?: boolean; isMyContact?: boolean; isOnline?: boolean; isPSA?: boolean; isUser?: boolean; isWAContact?: boolean; labels?: string[]; lastSeen?: number; msgs?: any[]; name?: string; profilePicThumbObj?: { eurl?: string; id?: string; img?: string; imgFull?: string; tag?: string }; pushname?: string; shortName?: string; statusMute?: boolean; type?: string; verifiedLevel?: number; verifiedName?: string }; formattedTitle?: string; groupMetadata?: { announce?: boolean; creation: number; desc?: string; descOwner?: string; descTime?: number; id: string; owner?: string; participants: { id: string; isAdmin: boolean; isSuperAdmin?: boolean }[]; restrict?: boolean; subject: string }; id: string; isGroup: boolean; isReadOnly?: boolean; lastReceivedKey?: any; msgs?: any[]; muteExpiration?: number; name?: string; notSpam?: boolean; pin?: number; presence?: object; t?: number; unreadCount?: number }; chatId: string; clientUrl?: string; content: string; deprecatedMms3Url?: string; event?: { chatId: string; creatorId: string; description?: string; endTime?: number; extraGuestsAllowed?: boolean; fromMe: boolean; id: string; isCanceled: boolean; isScheduledCall?: boolean; joinLink?: string; location?: { latitude?: number | "Infinity" | "-Infinity" | "NaN"; longitude?: number | "Infinity" | "-Infinity" | "NaN"; name?: string }; name: string; startTime: number; timestamp: number }; expectedImageCount?: number; expectedVideoCount?: number; from: string; fromMe: boolean; id: string; invis?: boolean; isForwarded?: boolean; isGif?: boolean; isGroupMsg: boolean; isMedia: boolean; isMMS?: boolean; isNewMsg?: boolean; isNotification: boolean; isPSA?: boolean; isQuotedMsgAvailable: boolean; labels?: string[]; mentionedJidList?: string[]; notifyName?: string; parentMsgKey?: string; quotedMsg?: any; quotedMsgObj?: any; recvFresh?: boolean; self: "in" | "out"; sender: { formattedName?: string; id: string; isBusiness?: boolean; isEnterprise?: boolean; isMe?: boolean; isMyContact?: boolean; isOnline?: boolean; isPSA?: boolean; isUser?: boolean; isWAContact?: boolean; labels?: string[]; lastSeen?: number; msgs?: any[]; name?: string; profilePicThumbObj?: { eurl?: string; id?: string; img?: string; imgFull?: string; tag?: string }; pushname?: string; shortName?: string; statusMute?: boolean; type?: string; verifiedLevel?: number; verifiedName?: string }; senderId?: string; star?: boolean; t: number; timestamp: number; to: string; type: "chat" | "audio" | "ptt" | "image" | "video" | "album" | "event_creation" | "event_response" | "document" | "sticker" | "location" | "vcard" | "multi_vcard" | "revoked" | "order" | "buttons_response" | "list_response" | "unknown" };
   /**
    * File path to save the media
    */
   path: string;
+}
+
+export interface EditEventParams {
+  /**
+   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
+   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
+   * @remarks Key aliases: 'id', 'msgId'
+   * @remarks Deprecated key aliases: 'msgId'
+   */
+  eventId: string;
+  /**
+   * @example {"description":"Updated meetup details"}
+   */
+  changes: { description?: string; endTime?: number | null; location?: string; name?: string; startTime?: number };
+}
+
+export interface EditMessageParams {
+  /**
+   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
+   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
+   * @remarks Key aliases: 'id', 'msgId'
+   * @remarks Deprecated key aliases: 'msgId'
+   */
+  messageId: string;
+  /**
+   * Replacement message text
+   */
+  newContent: string;
+}
+
+export interface EndCallParams {
+  call: { generation: string; id: string; sessionId: string };
 }
 
 export interface ForwardMessagesParams {
@@ -193,7 +244,17 @@ export interface ForwardMessagesParams {
    * Skip own messages
    * @example false
    */
-  skipMyMessages: boolean;
+  skipMyMessages?: boolean;
+}
+
+export interface GetAlbumMessagesParams {
+  /**
+   * Album container message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
+   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
+   * @remarks Key aliases: 'id', 'msgId'
+   * @remarks Deprecated key aliases: 'msgId'
+   */
+  messageId: string;
 }
 
 export interface GetAllChatsParams {
@@ -201,7 +262,7 @@ export interface GetAllChatsParams {
    * Only chats with unread messages
    * @example false
    */
-  withNewMessagesOnly: boolean;
+  withNewMessagesOnly?: boolean;
 }
 
 export interface GetAllGroupsParams {
@@ -209,7 +270,7 @@ export interface GetAllGroupsParams {
    * Only chats with unread messages
    * @example false
    */
-  withNewMessagesOnly: boolean;
+  withNewMessagesOnly?: boolean;
 }
 
 export interface GetAllMessagesParams {
@@ -222,11 +283,11 @@ export interface GetAllMessagesParams {
   /**
    * Include own messages
    */
-  includeMe: boolean;
+  includeMe?: boolean;
   /**
    * Include notification messages
    */
-  includeNotifications: boolean;
+  includeNotifications?: boolean;
 }
 
 export interface GetBusinessProductsParams {
@@ -321,6 +382,36 @@ export interface GetContactParams {
   contactId: string;
 }
 
+export interface GetEventParams {
+  /**
+   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
+   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
+   * @remarks Key aliases: 'id', 'msgId'
+   * @remarks Deprecated key aliases: 'msgId'
+   */
+  eventId: string;
+}
+
+export interface GetEventResponsesParams {
+  /**
+   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
+   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
+   * @remarks Key aliases: 'id', 'msgId'
+   * @remarks Deprecated key aliases: 'msgId'
+   */
+  eventId: string;
+}
+
+export interface GetEventsParams {
+  /**
+   * Recipient chat ID The target chat for a send operation Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
+   * @example "447123456789@c.us"
+   * @remarks Key aliases: 'chatId'
+   */
+  chatId: string;
+  options?: { before?: string; limit?: number };
+}
+
 export interface GetGroupAdminsParams {
   /**
    * Group chat ID A WhatsApp group JID Branded type: GroupChatId Pattern: ^\d+(-\d+)?@g\.us$
@@ -398,7 +489,7 @@ export interface GetMessagesForLLMParams {
    * @remarks Key aliases: 'contactId', 'id'
    */
   chatId: string;
-  last: number;
+  last?: number;
 }
 
 export interface GetMyLastMessageParams {
@@ -424,6 +515,16 @@ export interface GetOrderParams {
    * Order or message ID
    */
   id: string;
+}
+
+export interface GetPollResultsParams {
+  /**
+   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
+   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
+   * @remarks Key aliases: 'id', 'msgId'
+   * @remarks Deprecated key aliases: 'msgId'
+   */
+  messageId: string;
 }
 
 export interface GetProfilePictureParams {
@@ -549,6 +650,11 @@ export interface MarkAsUnreadParams {
   chatId: string;
 }
 
+export interface MuteCallParams {
+  call: { generation: string; id: string; sessionId: string };
+  muted: boolean;
+}
+
 export interface MuteChatParams {
   /**
    * Chat ID (phone number or formatted ID) A contact ID, group ID, or LID JID Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
@@ -562,6 +668,11 @@ export interface MuteChatParams {
   muteDuration: number | string;
 }
 
+export interface ObserveCallAudioParams {
+  call: { generation: string; id: string; sessionId: string };
+  speaker?: unknown;
+}
+
 export interface PinChatParams {
   /**
    * Chat ID (phone number or formatted ID) A contact ID, group ID, or LID JID Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
@@ -569,6 +680,17 @@ export interface PinChatParams {
    * @remarks Key aliases: 'contactId', 'id'
    */
   chatId: string;
+}
+
+export interface PinMessageParams {
+  /**
+   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
+   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
+   * @remarks Key aliases: 'id', 'msgId'
+   * @remarks Deprecated key aliases: 'msgId'
+   */
+  messageId: string;
+  duration?: "OneDay" | "SevenDays" | "ThirtyDays";
 }
 
 export interface PostImageStatusParams {
@@ -638,6 +760,10 @@ export interface ReactParams {
   emoji: string;
 }
 
+export interface RejectCallParams {
+  call: { generation: string; id: string; sessionId: string };
+}
+
 export interface RejectGroupJoinRequestParams {
   /**
    * Group chat ID A WhatsApp group JID Branded type: GroupChatId Pattern: ^\d+(-\d+)?@g\.us$
@@ -683,6 +809,29 @@ export interface RemoveParticipantParams {
   contactId: string;
 }
 
+export interface RequestPhoneNumberParams {
+  /**
+   * Recipient chat ID The target chat for a send operation Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
+   * @example "447123456789@c.us"
+   * @remarks Key aliases: 'chatId'
+   */
+  to: string;
+}
+
+export interface RespondToEventParams {
+  /**
+   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
+   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
+   * @remarks Key aliases: 'id', 'msgId'
+   * @remarks Deprecated key aliases: 'msgId'
+   */
+  eventId: string;
+  /**
+   * @example "going"
+   */
+  response: "going" | "notGoing" | "maybe";
+}
+
 export interface RevokeGroupInviteLinkParams {
   /**
    * Group chat ID A WhatsApp group JID Branded type: GroupChatId Pattern: ^\d+(-\d+)?@g\.us$
@@ -703,7 +852,7 @@ export interface SendAdvancedButtonsParams {
   /**
    * Message body, location, or media
    */
-  body: any;
+  body?: string | any;
   /**
    * Array of advanced buttons (max 3)
    */
@@ -722,6 +871,31 @@ export interface SendAdvancedButtonsParams {
   filename: string;
 }
 
+export interface SendAlbumParams {
+  /**
+   * Recipient chat ID The target chat for a send operation Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
+   * @example "447123456789@c.us"
+   * @remarks Key aliases: 'chatId'
+   */
+  to: string;
+  /**
+   * Album items in send order
+   */
+  media: { file: string; filename: string; isGif?: boolean }[];
+  /**
+   * Media caption
+   * @example "Check out this image!"
+   */
+  caption?: string;
+  /**
+   * Message to quote on the first album item A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
+   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
+   * @remarks Key aliases: 'id', 'msgId'
+   * @remarks Deprecated key aliases: 'msgId'
+   */
+  quotedMsgId?: string;
+}
+
 export interface SendAudioParams {
   /**
    * Recipient chat ID The target chat for a send operation Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
@@ -730,22 +904,16 @@ export interface SendAudioParams {
    */
   to: string;
   /**
-   * Audio file (path, URL, DataURL, or Base64) Branded type: DataURL Pattern: ^data:.+;base64,.+$
+   * Audio file (path, URL, DataURL, or Base64) Branded type: DataURL
    * @example "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAA..."
    */
-  file: string;
+  file: string | Buffer;
   /**
    * Filename with extension
    * @example "document.pdf"
    */
   filename?: string;
-  /**
-   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
-   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
-   * @remarks Key aliases: 'id', 'msgId'
-   * @remarks Deprecated key aliases: 'msgId'
-   */
-  quotedMsgId?: string;
+  options?: { quotedMsgId?: string };
 }
 
 export interface SendBannerParams {
@@ -771,7 +939,7 @@ export interface SendButtonsParams {
   /**
    * Message body or location
    */
-  body: any;
+  body?: string | any;
   /**
    * Array of buttons (max 3)
    */
@@ -796,6 +964,19 @@ export interface SendContactParams {
   contactId: string | string[];
 }
 
+export interface SendEventParams {
+  /**
+   * Recipient chat ID The target chat for a send operation Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
+   * @example "447123456789@c.us"
+   * @remarks Key aliases: 'chatId'
+   */
+  to: string;
+  /**
+   * @example {"name":"Community meetup","startTime":1893456000,"description":"Meet the community"}
+   */
+  event: { callType?: "voice" | "video"; description?: string; endTime?: number; extraGuestsAllowed?: boolean; isScheduledCall?: boolean; location?: string; name: string; quotedMsgId?: string; requireApproval?: boolean; startTime: number };
+}
+
 export interface SendFileParams {
   /**
    * Recipient chat ID The target chat for a send operation Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
@@ -804,20 +985,16 @@ export interface SendFileParams {
    */
   to: string;
   /**
-   * File (path, URL, DataURL, Base64, or Buffer) Branded type: DataURL Pattern: ^data:.+;base64,.+$
+   * File (path, URL, DataURL, Base64, or Buffer) Branded type: DataURL
    * @example "data:application/pdf;base64,JVBERi0xLjQK..."
    */
-  file: string;
+  file: string | Buffer;
   /**
    * Filename with extension
    * @example "document.pdf"
    */
   filename?: string;
-  /**
-   * Media caption
-   * @example "Check out this image!"
-   */
-  caption?: string;
+  options?: { caption?: string; quotedMsgId?: string; type?: "auto"; viewOnce?: boolean } | { caption?: string; quotedMsgId?: string; type: "image"; viewOnce?: boolean } | { caption?: string; isGif?: boolean; quotedMsgId?: string; type: "video"; videoNote?: boolean; viewOnce?: boolean } | { ptt?: boolean; quotedMsgId?: string; type: "audio"; viewOnce?: boolean } | { caption?: string; quotedMsgId?: string; type: "document" };
 }
 
 export interface SendFileFromUrlParams {
@@ -832,13 +1009,11 @@ export interface SendFileFromUrlParams {
    */
   url: string;
   /**
-   * Filename for the sent file
+   * Filename with extension
+   * @example "document.pdf"
    */
-  filename: string;
-  /**
-   * Caption for the file
-   */
-  caption?: string;
+  filename?: string;
+  options?: { caption?: string; quotedMsgId?: string; type?: "auto"; viewOnce?: boolean } | { caption?: string; quotedMsgId?: string; type: "image"; viewOnce?: boolean } | { caption?: string; isGif?: boolean; quotedMsgId?: string; type: "video"; videoNote?: boolean; viewOnce?: boolean } | { ptt?: boolean; quotedMsgId?: string; type: "audio"; viewOnce?: boolean } | { caption?: string; quotedMsgId?: string; type: "document" };
   /**
    * HTTP headers for the download request
    */
@@ -853,32 +1028,26 @@ export interface SendImageParams {
    */
   to: string;
   /**
-   * Image file (path, URL, DataURL, or Base64) Branded type: DataURL Pattern: ^data:.+;base64,.+$
-   * @example "data:image/png;base64,iVBORw0KGgo..."
+   * File (path, URL, DataURL, Base64, or Buffer) Branded type: DataURL
+   * @example "data:application/pdf;base64,JVBERi0xLjQK..."
    */
-  imgData: string;
+  file: string | Buffer;
   /**
    * Filename with extension
    * @example "document.pdf"
    */
   filename?: string;
+  options?: { caption?: string; quotedMsgId?: string; type?: "auto"; viewOnce?: boolean } | { caption?: string; quotedMsgId?: string; type: "image"; viewOnce?: boolean } | { caption?: string; isGif?: boolean; quotedMsgId?: string; type: "video"; videoNote?: boolean; viewOnce?: boolean } | { ptt?: boolean; quotedMsgId?: string; type: "audio"; viewOnce?: boolean } | { caption?: string; quotedMsgId?: string; type: "document" };
+}
+
+export interface SendInteractiveParams {
   /**
-   * Media caption
-   * @example "Check out this image!"
+   * Recipient chat ID The target chat for a send operation Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
+   * @example "447123456789@c.us"
+   * @remarks Key aliases: 'chatId'
    */
-  caption?: string;
-  /**
-   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
-   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
-   * @remarks Key aliases: 'id', 'msgId'
-   * @remarks Deprecated key aliases: 'msgId'
-   */
-  id?: string;
-  /**
-   * Wait for message ID
-   * @example true
-   */
-  waitForId: boolean;
+  to: string;
+  content: { actions: ({ id: string; label: string; type: "reply" } | { label: string; type: "url"; url: string } | { label: string; phoneNumber: string; type: "call" } | { code: string; label: string; type: "copy" })[]; body: string; footer?: string; header?: { text: string; type: "text" } | { filename?: string; source: string; title?: string; type: "image" } | { filename?: string; source: string; title?: string; type: "video" } | { filename?: string; source: string; title?: string; type: "document" }; type: "buttons"; version?: 1 } | { body: string; buttonLabel?: string; footer?: string; sections: { rows: { description?: string; id: string; title: string }[]; title?: string }[]; title?: string; type: "list"; version?: 1 } | { body: string; footer?: string; questions: ({ allowCustomAnswer?: boolean; id: string; label: string; options: { id: string; label: string }[]; type: "singleSelect" | "multiSelect" })[]; title?: string; type: "form"; version?: 1 } | { body: string; cards: ({ actions: ({ id: string; label: string; type: "reply" } | { label: string; type: "url"; url: string } | { label: string; phoneNumber: string; type: "call" } | { code: string; label: string; type: "copy" })[]; body: string; header: { filename?: string; source: string; title?: string; type: "image" } })[]; footer?: string; type: "carousel"; version?: 1 } | { actions?: ({ label: string; type: "url"; url: string } | { label: string; phoneNumber: string; type: "call" } | { code: string; label: string; type: "copy" })[]; body: string; booking: { description?: string; email?: string; endAt?: string; labels?: { addToCalendar?: string; detailsTitle?: string; language?: string; manageBooking?: string; meetingType?: string; viewOnMap?: string }; location?: string; managementUrl?: string; phoneNumber?: string; startAt: string; url?: string }; buttonLabel?: string; footer?: string; title?: string; type: "booking"; version?: 1 } | { actions: { name: string; parameters?: object }[]; body: string; footer?: string; header?: { text: string; type: "text" } | { filename?: string; source: string; title?: string; type: "image" } | { filename?: string; source: string; title?: string; type: "video" } | { filename?: string; source: string; title?: string; type: "document" }; parameters?: object; type: "native"; version?: 1 };
 }
 
 export interface SendLinkWithAutoPreviewParams {
@@ -912,7 +1081,7 @@ export interface SendLinkWithAutoPreviewParams {
   /**
    * Custom thumbnail size
    */
-  customSize?: { height: any; width: any; };
+  customSize?: { height: number; width: number };
 }
 
 export interface SendListMessageParams {
@@ -1011,7 +1180,7 @@ export interface SendMessageWithThumbParams {
   /**
    * Custom thumbnail size
    */
-  customSize?: { height: any; width: any; };
+  customSize?: { height: number; width: number };
 }
 
 export interface SendMultipleContactsParams {
@@ -1062,13 +1231,10 @@ export interface SendPollParams {
    */
   name: string;
   /**
-   * Poll options (2-12)
+   * Poll choices; the account may have a lower native limit
    */
   options: string[];
-  /**
-   * Number of selectable options
-   */
-  selectableCount: number;
+  config?: { endTime?: number; hideVoterNames?: boolean; quotedMsgId?: string; selectableCount?: number };
 }
 
 export interface SendPttParams {
@@ -1079,17 +1245,21 @@ export interface SendPttParams {
    */
   to: string;
   /**
-   * Audio file (path, URL, DataURL, or Base64) Branded type: DataURL Pattern: ^data:.+;base64,.+$
+   * Audio file (path, URL, DataURL, or Base64) Branded type: DataURL
    * @example "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAA..."
    */
-  file: string;
+  file: string | Buffer;
+  options?: { quotedMsgId?: string; viewOnce?: boolean };
+}
+
+export interface SendRawMessageParams {
   /**
-   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
-   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
-   * @remarks Key aliases: 'id', 'msgId'
-   * @remarks Deprecated key aliases: 'msgId'
+   * Recipient chat ID The target chat for a send operation Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
+   * @example "447123456789@c.us"
+   * @remarks Key aliases: 'chatId'
    */
-  quotedMsgId?: string;
+  to: string;
+  payload: Record<string, any>;
 }
 
 export interface SendReplyWithMentionsParams {
@@ -1132,6 +1302,20 @@ export interface SendSeenParams {
   chatId: string;
 }
 
+export interface SendStickerParams {
+  /**
+   * Recipient chat ID The target chat for a send operation Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
+   * @example "447123456789@c.us"
+   * @remarks Key aliases: 'chatId'
+   */
+  to: string;
+  /**
+   * A media data URL or HTTP(S) URL. The local library additionally accepts bytes, Blob and local filenames. Pattern: ^(?:data:(?:image|video)\/[^;,]+;base64,[A-Za-z0-9+/]+={0,2}|https?:\/\/\S+)$
+   */
+  input: string;
+  job?: { author?: string; backend?: "auto" | "browser" | "standalone"; background?: string; circle?: boolean; effects?: (string | { name: string; options?: object })[]; fit?: "contain" | "cover"; fps?: number; loopCount?: number; pack?: string; quality?: number; quotedMsgId?: string; trim?: number[] };
+}
+
 export interface SendTextParams {
   /**
    * Recipient chat ID The target chat for a send operation Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
@@ -1146,10 +1330,9 @@ export interface SendTextParams {
    */
   content: string;
   /**
-   * Additional message options
-   * @example &#123;"quotedMsg":"messageId","mentionedJidList":["447123456789@c.us"]&#125;
+   * Reserved for compatibility with legacy request shapes. The current sendText Client implementation ignores this argument; use reply() or sendTextWithMentions() for quoted replies and mentions. Accepted as unknown for compatibility; currently ignored by sendText. Use reply() or sendTextWithMentions() for supported reply and mention behavior.
    */
-  options?: any;
+  options?: unknown;
 }
 
 export interface SendTextWithMentionsParams {
@@ -1205,27 +1388,16 @@ export interface SendVideoAsGifParams {
    */
   to: string;
   /**
-   * Video file (path, URL, DataURL, or Base64) Branded type: DataURL Pattern: ^data:.+;base64,.+$
+   * Video file (path, URL, DataURL, or Base64) Branded type: DataURL
    * @example "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21..."
    */
-  file: string;
+  file: string | Buffer;
   /**
    * Filename with extension
    * @example "document.pdf"
    */
   filename?: string;
-  /**
-   * Media caption
-   * @example "Check out this image!"
-   */
-  caption?: string;
-  /**
-   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
-   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
-   * @remarks Key aliases: 'id', 'msgId'
-   * @remarks Deprecated key aliases: 'msgId'
-   */
-  quotedMsgId?: string;
+  options?: { caption?: string; quotedMsgId?: string };
 }
 
 export interface SendYouTubeLinkParams {
@@ -1244,7 +1416,7 @@ export interface SendYouTubeLinkParams {
    * @example "Hello, world!"
    * @remarks Key aliases: 'body', 'message', 'text'
    */
-  text: string;
+  text?: string;
   /**
    * Base64 thumbnail override
    */
@@ -1259,7 +1431,12 @@ export interface SendYouTubeLinkParams {
   /**
    * Custom thumbnail size
    */
-  customSize?: { height: any; width: any; };
+  customSize?: { height: number; width: number };
+}
+
+export interface SetCallMediaParams {
+  call: { generation: string; id: string; sessionId: string };
+  media?: { camera?: any; microphone?: any; onMediaFailure?: "end" | "keep-open"; speaker?: any; takeover?: boolean };
 }
 
 export interface SetChatEphemeralParams {
@@ -1367,10 +1544,19 @@ export interface SetMyStatusParams {
 
 export interface SetProfilePictureParams {
   /**
-   * Image file (path, URL, DataURL, or Base64) Branded type: DataURL Pattern: ^data:.+;base64,.+$
+   * Image file (path, URL, DataURL, or Base64) Branded type: DataURL
    * @example "data:image/png;base64,iVBORw0KGgo..."
    */
-  image: string;
+  image: string | Buffer;
+}
+
+export interface SharePhoneNumberParams {
+  /**
+   * Recipient chat ID The target chat for a send operation Branded type: ChatId Pattern: ^\d+(-\d+)?@(c|g)\.us$|^\d+@lid$
+   * @example "447123456789@c.us"
+   * @remarks Key aliases: 'chatId'
+   */
+  to: string;
 }
 
 export interface StarMessageParams {
@@ -1381,6 +1567,18 @@ export interface StarMessageParams {
    * @remarks Deprecated key aliases: 'msgId'
    */
   messageId: string;
+}
+
+export interface StartCallParams {
+  to: string;
+  microphone?: unknown;
+  speaker?: unknown;
+  camera?: unknown;
+}
+
+export interface StopCallAudioObserverParams {
+  call: { generation: string; id: string; sessionId: string };
+  observerId: string;
 }
 
 export interface UnarchiveChatParams {
@@ -1419,6 +1617,16 @@ export interface UnpinChatParams {
   chatId: string;
 }
 
+export interface UnpinMessageParams {
+  /**
+   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
+   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
+   * @remarks Key aliases: 'id', 'msgId'
+   * @remarks Deprecated key aliases: 'msgId'
+   */
+  messageId: string;
+}
+
 export interface UnstarMessageParams {
   /**
    * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
@@ -1427,4 +1635,15 @@ export interface UnstarMessageParams {
    * @remarks Deprecated key aliases: 'msgId'
    */
   messageId: string;
+}
+
+export interface VoteOnPollParams {
+  /**
+   * Message ID A WhatsApp message identifier Branded type: MessageId Pattern: ^(true|false)_.+_.+$
+   * @example "false_447123456789@c.us_9C4D0965EA5C09D591334AB6BDB07FEB"
+   * @remarks Key aliases: 'id', 'msgId'
+   * @remarks Deprecated key aliases: 'msgId'
+   */
+  messageId: string;
+  optionIds: number[];
 }

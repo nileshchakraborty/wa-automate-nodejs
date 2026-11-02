@@ -3,183 +3,61 @@ name: Release
 on:
   push:
     branches: [release]
+  workflow_dispatch:
+    inputs:
+      align_versions:
+        description: Complete version alignment for an already published release
+        type: boolean
+        default: false
 
-concurrency: ${{ github.workflow }}-${{ github.ref }}
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
 
 permissions:
+  actions: write
   contents: write
-  pull-requests: write
+  pull-requests: read
   packages: write
+  id-token: write
 
 jobs:
   release:
-    name: Release
     runs-on: ubuntu-latest
+    environment: Release
     env:
-      # The release only builds and publishes packages — it never needs a
-      # browser. Skip the Puppeteer Chromium download during install/build.
       PUPPETEER_SKIP_DOWNLOAD: '1'
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_ALIGN_VERSIONS: ${{ inputs.align_versions || 'false' }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: release
           fetch-depth: 0
-
       - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: 'pnpm'
-
+          node-version: 24
+          cache: pnpm
+      - run: npm install --global npm@^11.5.1
       - run: pnpm install --frozen-lockfile
-
-      - name: Validate release secrets
+      - name: Consume any bumps added just before the release merge
+        run: node tools/release/prepare-release.mjs --publishing
+      - name: Open or resume the release record
+        id: record
+        run: node tools/release/publish-release.mjs open
+      - name: Build packages for npm
+        if: steps.record.outputs.upload_npm == 'true'
+        run: pnpm build
+      - name: Submit unpublished versions to npm
+        if: steps.record.outputs.upload_npm == 'true'
+        run: node tools/release/publish-release.mjs npm
+      - name: Publish missing GitHub Packages
+        if: steps.record.outputs.active == 'true'
+        run: ./tools/release/publish-github-packages.sh
         env:
-          NPM_TOKEN: ${{ secrets['NPM_TOKEN'] }}
-        run: |
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "::error::NPM_TOKEN is not available to this workflow. Add it as a repository Actions secret, or grant this repository access if it is an organization secret."
-            exit 1
-          fi
-
-      # ── Determine version bump from merged PR labels ──────────────
-      - name: Determine version bump
-        id: bump
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Find the PR that was merged into this push
-          MERGE_SHA="${{ github.sha }}"
-
-          # Try to find the PR associated with this merge commit
-          PR_DATA=$(gh pr list \
-            --search "$MERGE_SHA" \
-            --state merged \
-            --json number,labels \
-            --limit 1 2>/dev/null || echo '[]')
-
-          if [ "$PR_DATA" = "[]" ]; then
-            # Fallback: check the commit message for PR number
-            PR_NUM=$(git log -1 --format="%s" | grep -oE '#[0-9]+' | head -1 | tr -d '#' || true)
-            if [ -n "$PR_NUM" ]; then
-              PR_DATA=$(gh pr view "$PR_NUM" --json labels 2>/dev/null || echo '{"labels":[]}')
-              LABELS=$(echo "$PR_DATA" | jq -r '.labels[].name // empty' 2>/dev/null || true)
-            else
-              LABELS=""
-            fi
-          else
-            LABELS=$(echo "$PR_DATA" | jq -r '.[0].labels[].name // empty' 2>/dev/null || true)
-          fi
-
-          echo "Labels found: $LABELS"
-
-          if echo "$LABELS" | grep -qi "bump:major"; then
-            echo "type=major" >> $GITHUB_OUTPUT
-            echo "Bump type: major"
-          elif echo "$LABELS" | grep -qi "bump:minor"; then
-            echo "type=minor" >> $GITHUB_OUTPUT
-            echo "Bump type: minor"
-          else
-            echo "type=patch" >> $GITHUB_OUTPUT
-            echo "Bump type: patch (default)"
-          fi
-
-      # ── Ensure changeset exists ──────────────────────────────────
-      - name: Ensure changeset
-        run: pnpm tsx tools/release/ensure-changeset.ts --bump ${{ steps.bump.outputs.type }}
-
-      # ── Changesets: version + publish ────────────────────────────
-      - name: Create Release PR or Publish
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          version: pnpm version-packages
-          publish: pnpm publish-packages
-          commit: 'chore: version packages'
-          title: 'chore: version packages'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets['NPM_TOKEN'] }}
-          NODE_AUTH_TOKEN: ${{ secrets['NPM_TOKEN'] }}
-
-      # ── Post-publish: Get version ────────────────────────────────
-      - name: Get published version
-        if: steps.changesets.outputs.published == 'true'
-        id: version
-        run: |
-          VERSION=$(jq -r .version packages/core/package.json)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Published version: $VERSION"
-
-      # ── Post-publish: Generate release notes ─────────────────────
-      - name: Generate release notes
-        if: steps.changesets.outputs.published == 'true'
-        run: pnpm tsx tools/release/generate-notes.ts --version ${{ steps.version.outputs.version }}
-        env:
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-
-      # ── Post-publish: Generate release image ─────────────────────
-      # The image is rendered with Puppeteer/Chrome, but the job skips the
-      # Chromium download (PUPPETEER_SKIP_DOWNLOAD) to keep install/build lean,
-      # so fetch a browser here just for this cosmetic step. Both this install
-      # and the render are continue-on-error: a missing release image must
-      # never block the actual GitHub Release / Discord notification (the
-      # Create GitHub Release step already handles an absent release.png).
-      - name: Install Chrome for release image
-        if: steps.changesets.outputs.published == 'true'
-        continue-on-error: true
-        env:
-          PUPPETEER_SKIP_DOWNLOAD: '0'
-        run: npx puppeteer browsers install chrome
-
-      - name: Generate release image
-        if: steps.changesets.outputs.published == 'true'
-        continue-on-error: true
-        run: node tools/release-image.js --version ${{ steps.version.outputs.version }}
-
-      # ── Post-publish: Create GitHub Release ──────────────────────
-      - name: Create GitHub Release
-        if: steps.changesets.outputs.published == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="v${VERSION}"
-
-          # Use release notes if available, otherwise a default
-          NOTES_FILE="RELEASE_BODY.md"
-          if [ ! -f "$NOTES_FILE" ]; then
-            echo "# @open-wa v${VERSION}" > "$NOTES_FILE"
-            echo "" >> "$NOTES_FILE"
-            echo "Release v${VERSION}" >> "$NOTES_FILE"
-          fi
-
-          # Determine if this is a pre-release
-          PRE_FLAG=""
-          if echo "$VERSION" | grep -qE "alpha|beta|rc|pre"; then
-            PRE_FLAG="--prerelease"
-          fi
-
-          # Create the release
-          RELEASE_ARGS=(
-            "$TAG"
-            --title "$TAG"
-            --notes-file "$NOTES_FILE"
-            $PRE_FLAG
-          )
-
-          # Attach release image if it exists
-          if [ -f "release.png" ]; then
-            gh release create "${RELEASE_ARGS[@]}" release.png
-          else
-            gh release create "${RELEASE_ARGS[@]}"
-          fi
-
-          echo "✅ GitHub Release created: $TAG"
-
-      # ── Post-publish: Discord notification ───────────────────────
-      - name: Notify Discord
-        if: steps.changesets.outputs.published == 'true'
-        run: pnpm tsx tools/release/discord-notify.ts --version ${{ steps.version.outputs.version }}
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          BUMPY_PACKAGES: ${{ steps.record.outputs.packages }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Publish the GitHub release and start availability tracking
+        if: steps.record.outputs.active == 'true'
+        run: node tools/release/publish-release.mjs finish

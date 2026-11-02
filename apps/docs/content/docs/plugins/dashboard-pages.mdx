@@ -1,81 +1,127 @@
 ---
 title: Dashboard Pages
-description: Add custom pages to the open-wa dashboard from your plugin.
+description: Render plugin components inside Neo pages and the normal Chat feed.
 ---
 
 # Dashboard Pages
 
-Plugins can add custom pages to the open-wa dashboard. This lets you expose plugin status, stats, and controls through the built-in UI.
+Plugins can supply native components inside Neo's shell and extend its existing
+Chat view. Neo supplies React, shared UI controls, privacy, calling, and
+requests scoped to your plugin. A browser module runs with the dashboard's
+trust; install modules only from plugins you trust.
 
-## What Are Dashboard Pages
+## Add a page
 
-Dashboard pages are declared in your plugin definition and mounted automatically in the dashboard under your plugin section.
+Return a root page declaration and serve a self-contained ES module from the
+plugin's Hono routes. Include the module file in the published package.
 
-## Declaring Pages
-
-Add a `pages` array to your plugin definition:
-
-```ts
-export default createPlugin({
-  meta: { name: 'my-plugin' },
-  pages: [
-    {
-      path: '/',
-      title: 'Status',
-      icon: '📊',
-    },
-    {
-      path: '/stats',
-      title: 'Statistics',
-      icon: '📈',
-    },
-  ],
-  init: async ({ events, logger, config, client }) => {
-    // Plugin initialization
-  },
-});
+```js
+// In the object returned by init():
+routeAuth: 'host',
+pages: [{
+  path: '/',
+  title: 'Greeting bot',
+  icon: '👋',
+  module: 'dashboard.js',
+}],
+routes: () => {
+  const app = new Hono();
+  app.get('/dashboard.js', async c => c.body(
+    await readFile(new URL('./dashboard.js', import.meta.url), 'utf8'),
+    200,
+    { 'Content-Type': 'text/javascript' },
+  ));
+  app.get('/health', c => c.json({ status: 'Ready' }));
+  return app;
+},
 ```
 
-### Page Properties
+Import `Hono` from `hono` and `readFile` from `node:fs/promises` in your plugin's
+server entry. The file URL above assumes the browser module sits beside that
+entry; preserve the corresponding layout in your package.
 
-- **path**: The URL path within your plugin dashboard section. `/` is the root page.
-- **title**: The display name shown in the sidebar.
-- **icon**: An emoji shown next to the title in the sidebar.
+```js
+// dashboard.js — browser module, without bare package imports
+export function createPage({ React, ui, json }) {
+  const { createElement: h, useEffect, useState } = React;
+  return function GreetingPage() {
+    const [status, setStatus] = useState('Loading…');
+    useEffect(() => {
+      const controller = new AbortController();
+      json('health', { signal: controller.signal })
+        .then(value => setStatus(value.status))
+        .catch(() => { if (!controller.signal.aborted) setStatus('Unavailable'); });
+      return () => controller.abort();
+    }, []);
+    return h('div', { className: 'dashboard-page' },
+      h(ui.PageHeader, { title: 'Greeting bot' }),
+      h('p', { role: 'status' }, status));
+  };
+}
+```
 
-## What the Dashboard Renders
+Open **Plugins → Greeting bot**, at `/dashboard/plugins/greeting-bot`. A page
+without `module` displays the plugin's status metadata. Use `path: '/'` for a
+custom page; nested plugin page routes aren't implemented.
 
-Each page renders as a content area in the dashboard. The page at `/` becomes the default page when users navigate to your plugin section.
+`title`, `icon`, `description`, and optional `order` describe a page. Use an
+emoji for the sidebar icon. The current sidebar doesn't apply `order` sorting.
 
-## Real-Time Stats
+## Extend the normal Chat feed
 
-To show real-time data, track state in your plugin:
+Return `chat: { module: 'chat.js' }` from `init()` and serve that module from your
+plugin routes. Its `createChat(host)` factory returns a React component receiving
+`chatId` and `children`. Call `children()` with a toolbar and feed entries:
 
-```ts
-let messageCount = 0;
-
-export default createPlugin({
-  meta: { name: 'stats-plugin' },
-  pages: [
-    {
-      path: '/',
-      title: 'Stats',
-      icon: '📊',
-    },
-  ],
-  init: async ({ events, logger }) => {
-    events.on('message.received', () => {
-      messageCount++;
+```js
+export function createChat({ React }) {
+  const h = React.createElement;
+  return function ChatControls({ chatId, children }) {
+    return children({
+      toolbar: h('div', { className: 'border-b p-3' },
+        'Greeting bot is available in this conversation.'),
+      entries: [],
     });
-  },
-});
+  };
+}
 ```
 
-## Custom React Components
+A feed entry has `id`, `at` (Unix milliseconds), and React `content`. Add
+`messageId` to place it beneath a matching loaded WhatsApp message. Otherwise,
+Neo inserts it into the timeline in time order. Namespace entry IDs within your
+plugin and keep them stable across updates. New transcripts update the existing
+entry rather than duplicating it. Return an empty contribution for chats your
+plugin doesn't handle. Dispose subscriptions when `chatId` changes or the
+component unmounts.
 
-Custom React components for dashboard pages are planned for a future release. Currently, pages are rendered as simple content areas.
+Voxtral uses this interface for voice-note transcripts, call turns, and pause
+and takeover controls. Its settings and usage stay on its plugin page.
+
+## Host helpers
+
+- `React` is Neo's own React instance. Don't bundle another copy.
+- `ui` includes `Button`, `Input`, `Textarea`, `PageHeader`, `DetailSheet`, and
+  BoardUI table components.
+- `json(path, init)` and `request(path, init)` use the current Easy API connection
+  and its API key header. Paths stay under `/plugins/<your-plugin>/`.
+- `watch(path, receive, signal)` consumes `event: snapshot` SSE events. Handle
+  reconnects in your component and fetch a fresh snapshot; it doesn't replay
+  past events.
+- `usePrivacy()` and `useCalling()` expose Neo's shared hooks. Apply privacy
+  redaction to names and content; use the shared call controller for human audio.
+- `chatUrl(peer)` returns a link to the person's existing Chat view.
+
+Browser modules are fetched with authenticated requests and imported on demand.
+Keep them self-contained: inline styles or bundle their dependencies ahead of
+publication. Relative module imports aren't resolved against the plugin route.
+
+`routeAuth: 'host'` protects plugin routes with `X-API-Key` when Easy API has a
+key. Without a key, these routes accept loopback access and reject browser
+requests from another origin. Remote use needs a configured Easy API key.
 
 ## Related
 
-- **[Plugin getting started](/docs/plugins/getting-started)** - Build your first plugin
-- **[AI Tools](/docs/plugins/ai-tools)** - Register AI tools from plugins
-- **[Hono Routes](/docs/plugins/hono-routes)** - Add HTTP routes to plugins
+- [Plugin getting started](/docs/plugins/getting-started)
+- [PluginInput](/docs/plugins/plugin-input)
+- [HTTP routes](/docs/plugins/hono-routes)
+- [Voxtral](/docs/guides/voxtral)

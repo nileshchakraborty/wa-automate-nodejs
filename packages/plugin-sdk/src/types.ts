@@ -6,6 +6,7 @@
  */
 import type { Hono } from 'hono';
 import type { z } from 'zod';
+import type { MediaSendOptions } from '@open-wa/schema';
 
 // ============================================================================
 // Plugin Input — What plugins receive from the host
@@ -39,6 +40,9 @@ export interface PluginInput<TConfig = unknown> {
   /** Current session ID */
   sessionId: string;
 
+  /** Aborted when the host starts disposing this plugin and its handlers. */
+  signal: AbortSignal;
+
   /**
    * Client proxy for calling WA methods.
    *
@@ -50,6 +54,20 @@ export interface PluginInput<TConfig = unknown> {
    * the hood; plugins never get direct browser/CDP access.
    */
   client: PluginClient;
+
+  /** Host-side facade, including local media preparation and stream-capable calls. */
+  runtime: PluginRuntime;
+
+  /** Session-host services shared by cooperating plugins, disposed after plugins. */
+  services: PluginServices;
+}
+
+export interface PluginServices {
+  getOrCreate<T>(name: string, create: (signal: AbortSignal) => Promise<{ value: T; dispose: () => void | Promise<void> }>): Promise<T>;
+}
+
+export interface PluginRuntime {
+  invoke<T = unknown>(method: string, args?: unknown[]): Promise<T>;
 }
 
 // ============================================================================
@@ -65,13 +83,13 @@ export interface PluginInput<TConfig = unknown> {
  *
  * Common methods:
  * - sendText(to, content) → messageId
- * - sendImage(to, url, filename, caption?) → messageId
+ * - sendImage(to, url, filename?, options?) → messageId
  * - sendLocation(to, lat, lng, text?) → messageId
  * - sendLinkWithAutoPreview(to, url, text) → messageId
  * - decryptMedia(message) → base64 string
  * - getHostNumber() → phone number string
  * - getContact(contactId) → contact object
- * - sendFile(to, file, filename, caption?) → messageId
+ * - sendFile(to, file, filename?, options?) → messageId
  * - reply(to, content, quotedMsgId) → messageId
  * - forwardMessages(to, messages, skipMyMessages?) → boolean
  *
@@ -94,8 +112,8 @@ export interface PluginClient {
 
   // Convenience methods (all delegate to ask() under the hood)
   sendText(to: string, content: string): Promise<string>;
-  sendImage(to: string, url: string, filename: string, caption?: string): Promise<string>;
-  sendFile(to: string, base64: string, filename: string, caption?: string): Promise<string>;
+  sendImage(to: string, url: string, filename?: string, options?: MediaSendOptions): Promise<string | boolean>;
+  sendFile(to: string, base64: string, filename?: string, options?: MediaSendOptions): Promise<string | boolean>;
   sendLocation(to: string, lat: string, lng: string, text?: string): Promise<string>;
   sendLinkWithAutoPreview(to: string, url: string, text: string): Promise<string>;
   reply(to: string, content: string, quotedMsgId: string): Promise<string>;
@@ -207,12 +225,18 @@ export interface Hooks {
    */
   routes?: () => Hono;
 
+  /** Protect this plugin's routes with Easy API header authentication (or local access). */
+  routeAuth?: 'host';
+
   // ── Dashboard Pages ────────────────────────────────────
   /**
    * Declare dashboard pages this plugin provides.
    * Pages are rendered in the dashboard sidebar and loaded on demand.
    */
   pages?: DashboardPage[];
+
+  /** Extend Neo's existing Chat view with a toolbar and chronological feed entries. */
+  chat?: { module: string };
 
   // ── Tools (AI/Automation) ──────────────────────────────
   /**
@@ -235,8 +259,7 @@ export interface Hooks {
 /**
  * Declares a page that this plugin wants rendered in the dashboard.
  *
- * For v1, the dashboard renders a standard status/config view for plugins.
- * Custom React component support will come later.
+ * A page can supply an ES module exporting createPage(host), rendered inside Neo.
  */
 export interface DashboardPage {
   /** Route segment: becomes `/plugins/<pluginName>/<path>` in the dashboard */
@@ -255,6 +278,44 @@ export interface DashboardPage {
    * Optional description shown in the plugin's default status view.
    */
   description?: string;
+
+  /** Plugin-relative ES module, e.g. `dashboard.js`. Served by the plugin routes. */
+  module?: string;
+}
+
+/** Browser module contract. React and UI components are supplied by Neo, not bundled twice. */
+export interface PluginPageHost {
+  /** Shared OpenWA OpenUI catalogue; Message renders read-only unless onAction is supplied. */
+  openui: {
+    Message: unknown;
+    Workbench: unknown;
+    compile: typeof import('./openui').compileOpenUI;
+    createMessage: typeof import('./openui').createOpenUIMessage;
+    prompt: typeof import('./openui').openUIPrompt;
+  };
+  React: unknown;
+  ui: Record<string, unknown>;
+  useCalling: () => unknown;
+  usePrivacy: () => unknown;
+  chatUrl(peer: string): string;
+  request(path: string, init?: RequestInit): Promise<Response>;
+  json<T = unknown>(path: string, init?: RequestInit): Promise<T>;
+  watch(path: string, receive: (snapshot: unknown) => void, signal: AbortSignal): Promise<void>;
+}
+
+/** A createChat(host) component receives these props and calls children with its view. */
+export interface PluginChatProps {
+  chatId: string;
+  children(view: { toolbar?: unknown; entries: PluginChatEntry[] }): unknown;
+}
+
+export interface PluginChatEntry {
+  id: string;
+  /** Unix milliseconds. */
+  at: number;
+  /** Attach to this WhatsApp message when it is loaded; otherwise render in time order. */
+  messageId?: string;
+  content: unknown;
 }
 
 // ============================================================================
@@ -311,6 +372,7 @@ export interface PluginManifestEntry {
   version?: string;
   description?: string;
   pages: DashboardPage[];
+  chat?: { module: string };
   hasRoutes: boolean;
   tools: string[];
 }

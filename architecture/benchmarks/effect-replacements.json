@@ -1,0 +1,46 @@
+{
+  "benchmark": "effect-v4-replacement-spikes",
+  "recordedAt": "2026-10-07T22:08:47.423Z",
+  "effect": "4.0.2",
+  "runtime": "v26.10.0-darwin-arm64",
+  "performance": {
+    "schemaDecode": {
+      "effect": {
+        "iterations": 100000,
+        "durationMs": 76.96,
+        "operationsPerSecond": 1299295
+      },
+      "zod": {
+        "iterations": 100000,
+        "durationMs": 4.09,
+        "operationsPerSecond": 24471567
+      }
+    },
+    "eventFanout": {
+      "effectPubSub": {
+        "iterations": 10000,
+        "durationMs": 40.71,
+        "operationsPerSecond": 245640
+      },
+      "hyperEmitter": {
+        "iterations": 10000,
+        "durationMs": 1.82,
+        "operationsPerSecond": 5497653
+      }
+    }
+  },
+  "bundles": {
+    "schema": {
+      "effectBytes": 247894,
+      "zodBytes": 453125
+    },
+    "events": {
+      "effectBytes": 143715,
+      "hyperEmitterBytes": 6002
+    },
+    "declaration": {
+      "effectHttpRpcBytes": 313145,
+      "handAuthoredBytes": 190
+    }
+  }
+}

@@ -1,7 +1,6 @@
 import { createClient } from '@open-wa/core';
 import { Client as ClientFacade } from '@open-wa/client';
-import { LightpandaDriver } from '@open-wa/driver-lightpanda';
-import { PuppeteerDriver } from '@open-wa/driver-puppeteer';
+import { selectRuntimeDriver as selectSharedRuntimeDriver, resolveExecutablePath as resolveSharedExecutablePath, makeDefaultCallMediaHost, type DriverSelection } from './runtime-client';
 import { eventRegistry } from '@open-wa/schema';
 import { WAServer } from './server/hono-server';
 import { resolveConfig, type PartialConfig, type Config, type TrackedConfig } from '@open-wa/config';
@@ -9,12 +8,19 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getCliOutputSink, type CliOutputSink } from './cli/output-sink';
+import {
+    defaultChatSandboxPolicy,
+    type ChatSandboxPolicy,
+    type SandboxIsolation,
+} from '@open-wa/runtime-core';
+import { makeNodeExecutionSandbox, observeBrowserProcessMemory } from '@open-wa/runtime-node';
 
 export interface CliRuntimeResult {
     server: WAServer;
     client: ClientFacade;
     config: Config;
     events: ClientFacade['events'];
+    dispose(): void;
 }
 
 interface RuntimeEventPublisher {
@@ -32,6 +38,7 @@ function bridgeRuntimeEvents(
 
     const unsubscribers: Array<() => void> = [];
     const bridgedEvents = new Set(eventRegistry.getAll().map((def) => def.meta.eventName));
+    bridgedEvents.add('session.refresh.progress');
 
     bridgedEvents.forEach((eventName) => {
         const handler = (payload: any) => publishRuntimeEvent(eventName, payload);
@@ -193,15 +200,9 @@ interface ExecutablePathResolution {
         | 'chrome_installation'
         | 'driver_default'
         | 'lightpanda_config'
-        | 'lightpanda_sdk_default';
+        | 'lightpanda_managed'
+        | 'managed_browser';
     warning?: string;
-}
-
-interface DriverSelection {
-    driver: PuppeteerDriver | LightpandaDriver;
-    engineLabel: 'Puppeteer' | 'Lightpanda';
-    executableResolution: ExecutablePathResolution;
-    preferLocalChrome: boolean;
 }
 
 export interface ParsedCliArgs {
@@ -272,7 +273,7 @@ function getExplicitUseChromePreference(rawConfigs?: TrackedConfig['rawConfigs']
 }
 
 export function shouldPreferLocalChrome(config: Config, rawConfigs?: TrackedConfig['rawConfigs']): boolean {
-    if (config.useLightpanda) {
+    if (config.useLightpanda || config.useChromium || config.browser?.kind === 'chromium') {
         return false;
     }
 
@@ -291,6 +292,35 @@ export function shouldPreferLocalChrome(config: Config, rawConfigs?: TrackedConf
 function getVal(argv: string[], flag: string): string | undefined {
     const index = argv.findIndex(arg => arg === flag);
     return index !== -1 ? argv[index + 1] : undefined;
+}
+
+function parseSandboxIsolation(value: string): SandboxIsolation {
+    switch (value) {
+        case 'worker':
+        case 'process':
+        case 'container':
+            return value;
+        default:
+            throw new Error(`Invalid --sandbox-isolation value: ${value}`);
+    }
+}
+
+export function resolveChatSandboxPolicy(config: Config['sandboxChats']): ChatSandboxPolicy | undefined {
+    if (!config) return undefined;
+
+    const overrides = typeof config === 'object'
+        ? config as Partial<Omit<ChatSandboxPolicy, 'chats'>>
+        : {};
+    return {
+        ...defaultChatSandboxPolicy,
+        ...overrides,
+        chats: true,
+        networkAllowlist: [...(overrides.networkAllowlist ?? defaultChatSandboxPolicy.networkAllowlist)],
+        env: overrides.env === 'none' || overrides.env === undefined
+            ? overrides.env ?? defaultChatSandboxPolicy.env
+            : [...overrides.env],
+        capabilities: [...(overrides.capabilities ?? defaultChatSandboxPolicy.capabilities)],
+    };
 }
 
 export function parseCliArgs(argv: string[] = process.argv.slice(2)): ParsedCliArgs {
@@ -317,12 +347,32 @@ export function parseCliArgs(argv: string[] = process.argv.slice(2)): ParsedCliA
     if (argv.includes('--no-ezqr')) cliOverrides.ezqr = false;
     if (argv.includes('--headful')) cliOverrides.headless = false;
     if (argv.includes('--headless')) cliOverrides.headless = true;
-    if (argv.includes('--use-chrome')) cliOverrides.useChrome = true;
-    if (argv.includes('--use-lightpanda')) cliOverrides.useLightpanda = true;
+    const browserFlags = ['--use-chrome', '--use-chromium', '--use-lightpanda'].filter(flag => argv.includes(flag) || flag === '--use-lightpanda' && argv.includes('--lightpanda'));
+    if (browserFlags.length > 1) throw new Error('Choose only one of --use-chrome, --use-chromium or --use-lightpanda.');
+    if (browserFlags.length) {
+        cliOverrides.useChrome = browserFlags[0] === '--use-chrome';
+        cliOverrides.useChromium = browserFlags[0] === '--use-chromium';
+        cliOverrides.useLightpanda = browserFlags[0] === '--use-lightpanda';
+    }
     if (argv.includes('--log-console')) cliOverrides.logConsole = true;
     if (argv.includes('--aggressive-garbage-collection')) cliOverrides.aggressiveGarbageCollection = true;
     if (argv.includes('--no-dashboard')) cliOverrides.dashboard = false;
     if (argv.includes('--ephemeral')) cliOverrides.ephemeral = true;
+    if (argv.includes('--sandbox-chats')) cliOverrides.sandboxChats = true;
+
+    const sandboxIsolation = getVal(argv, '--sandbox-isolation');
+    if (sandboxIsolation) {
+        const { chats: _chats, ...sandboxDefaults } = defaultChatSandboxPolicy;
+        cliOverrides.sandboxChats = {
+            ...sandboxDefaults,
+            isolation: parseSandboxIsolation(sandboxIsolation),
+            networkAllowlist: [...defaultChatSandboxPolicy.networkAllowlist],
+            env: defaultChatSandboxPolicy.env === 'none'
+                ? 'none'
+                : [...defaultChatSandboxPolicy.env],
+            capabilities: [...defaultChatSandboxPolicy.capabilities],
+        };
+    }
 
     const qrTimeout = getVal(argv, '--qr-timeout');
     if (qrTimeout) cliOverrides.qrTimeout = parseInt(qrTimeout, 10);
@@ -390,90 +440,22 @@ export function parseCliArgs(argv: string[] = process.argv.slice(2)): ParsedCliA
 
 export async function resolveExecutablePath(
     config: Config,
-    options: {
-        preferLocalChrome?: boolean;
-        cacheFilePath?: string;
-    } = {}
+    options: { preferLocalChrome?: boolean; cacheFilePath?: string } = {},
 ): Promise<ExecutablePathResolution> {
-    if (config.executablePath) {
-        return {
-            executablePath: config.executablePath,
-            source: 'config',
-        };
-    }
-
-    const preferLocalChrome = options.preferLocalChrome ?? config.useChrome;
-    if (!preferLocalChrome) {
-        return {
-            source: 'driver_default',
-        };
-    }
-
-    const cacheFilePath = options.cacheFilePath ?? getChromeCacheFilePath();
-    const cachedPath = readChromePathCache(cacheFilePath)?.executablePath;
-    if (isUsableExecutablePath(cachedPath)) {
-        return {
-            executablePath: cachedPath,
-            source: 'cache',
-        };
-    }
-
-    if (cachedPath) {
-        clearChromePathCache(cacheFilePath);
-    }
-
-    const { Launcher } = await import('chrome-launcher');
-    const detectedPath = Launcher.getInstallations().find((installationPath) => isUsableExecutablePath(installationPath));
-
-    if (detectedPath) {
-        writeChromePathCache(detectedPath, cacheFilePath);
-        return {
-            executablePath: detectedPath,
-            source: 'chrome_installation',
-        };
-    }
-
-    clearChromePathCache(cacheFilePath);
-
-    return {
-        source: 'driver_default',
-        warning: 'Chrome resolution warning: no valid local Chrome installation was found. Falling back to Puppeteer/default driver browser resolution.',
-    };
+    return resolveSharedExecutablePath(config, {
+        ...options,
+        cacheFilePath: options.cacheFilePath ?? getChromeCacheFilePath(),
+        kind: config.useChromium || config.browser?.kind === 'chromium' ? 'chromium' : 'chrome',
+    });
 }
 
-function resolveLightpandaExecutablePath(config: Config): ExecutablePathResolution {
-    const executablePath = config.lightpanda?.executablePath;
-    if (executablePath) {
-        return {
-            executablePath,
-            source: 'lightpanda_config',
-        };
-    }
-
-    return {
-        source: 'lightpanda_sdk_default',
-    };
-}
-
-async function selectRuntimeDriver(config: Config, rawConfigs?: TrackedConfig['rawConfigs']): Promise<DriverSelection> {
-    if (config.useLightpanda) {
-        return {
-            driver: new LightpandaDriver(),
-            engineLabel: 'Lightpanda',
-            executableResolution: resolveLightpandaExecutablePath(config),
-            preferLocalChrome: false,
-        };
-    }
-
-    const preferLocalChrome = shouldPreferLocalChrome(config, rawConfigs);
-    const executableResolution = await resolveExecutablePath(config, { preferLocalChrome });
-
-    return {
-        driver: new PuppeteerDriver(),
-        engineLabel: 'Puppeteer',
-        executableResolution,
-        preferLocalChrome,
-    };
+async function selectRuntimeDriver(config: Config, rawConfigs?: TrackedConfig['rawConfigs'], nonInteractive = false): Promise<DriverSelection> {
+    return selectSharedRuntimeDriver(config, {
+        rawConfigs,
+        cacheFilePath: getChromeCacheFilePath(),
+        promptForMissingBrowser: true,
+        nonInteractive,
+    });
 }
 
 function printStartupSummary(
@@ -498,16 +480,16 @@ function printStartupSummary(
     }
     if (resolution.source === 'lightpanda_config' && resolution.executablePath) {
         sink.write({ level: 'info', message: `Browser executable: explicit Lightpanda override (${resolution.executablePath})` });
-    } else if (resolution.source === 'lightpanda_sdk_default') {
-        sink.write({ level: 'info', message: 'Browser executable: Lightpanda SDK managed executable (shared cache/default resolution)' });
+    } else if (resolution.source === 'lightpanda_managed') {
+        sink.write({ level: 'info', message: `Browser executable: Lightpanda with experimental WhatsApp setup (${resolution.executablePath})` });
     } else if (resolution.source === 'config' && config.executablePath) {
         sink.write({ level: 'info', message: `Browser executable: explicit override (${config.executablePath})` });
     } else if (resolution.source === 'cache') {
-        sink.write({ level: 'info', message: `Browser executable: local Chrome from cache (${resolution.executablePath})` });
+        sink.write({ level: 'info', message: `Browser executable: cached browser (${resolution.executablePath})` });
     } else if (resolution.source === 'chrome_installation') {
-        sink.write({ level: 'info', message: `Browser executable: local Chrome detected (${resolution.executablePath})` });
-    } else if (preferLocalChrome) {
-        sink.write({ level: 'info', message: 'Browser executable: driver default fallback (local Chrome unavailable)' });
+        sink.write({ level: 'info', message: `Browser executable: installed ${config.browser?.kind === 'chromium' ? 'Chromium' : 'Chrome'} (${resolution.executablePath})` });
+    } else if (resolution.source === 'managed_browser') {
+        sink.write({ level: 'info', message: `Browser executable: managed ${config.browser?.kind === 'chromium' ? 'Chromium' : 'Chrome'} (${resolution.executablePath})` });
     }
     if (config.webhook) {
         sink.write({
@@ -541,13 +523,13 @@ export async function start(parsedArgs: ParsedCliArgs = parseCliArgs()): Promise
 
     unsupportedWarnings.forEach((warning) => sink.write({ level: 'warn', message: `Compatibility warning: ${warning}` }));
 
-    const driverSelection = await selectRuntimeDriver(config, rawConfigs);
+    const driverSelection = await selectRuntimeDriver(config, rawConfigs, parsedArgs.forwardedArgs.includes('--non-interactive'));
     const { driver, engineLabel, executableResolution, preferLocalChrome } = driverSelection;
     if (executableResolution.warning) {
         sink.write({ level: 'warn', message: executableResolution.warning });
     }
 
-    const server = new WAServer(config);
+    const server = new WAServer(config, verbose);
     sink.status({ phase: 'server.starting', sessionId: config.sessionId });
 
     await server.start();
@@ -558,32 +540,65 @@ export async function start(parsedArgs: ParsedCliArgs = parseCliArgs()): Promise
     sink.status({ phase: 'client.starting', sessionId: config.sessionId });
     sink.write({ level: 'info', message: 'Starting WhatsApp Client...' });
 
+    const sandboxPolicy = resolveChatSandboxPolicy(config.sandboxChats);
+    const executionSandbox = sandboxPolicy
+        ? makeNodeExecutionSandbox({ workspacePath: process.cwd() })
+        : undefined;
+
     const openwaClient = await createClient({
         sessionId: config.sessionId,
+        pluginRefs: config.plugins,
+        pluginConfig: config.pluginConfig,
+        hooks: config.hooks,
+        eventMode: config.eventMode,
         driver,
         deleteSessionDataOnLogout: config.deleteSessionDataOnLogout,
         killClientOnLogout: config.killClientOnLogout,
         sessionDataPath: config.sessionDataPath,
+        sessionData: config.sessionData,
+        skipSessionSave: config.skipSessionSave,
+        sessionDataBucketAuth: config.sessionDataBucketAuth,
+        sessionDataEncryptionKey: config.sessionDataEncryptionKey,
+        sessionDataEncryptionKeyFile: config.sessionDataEncryptionKeyFile,
+        s3Sync: config.s3Sync,
         debug: config.logLevel === 'debug' || verbose || config.logConsole,
         headless: config.headless,
         qrTimeoutMs: typeof config.qrTimeout === 'number' ? config.qrTimeout * 1000 : undefined,
         authTimeoutMs: typeof config.authTimeout === 'number' ? config.authTimeout * 1000 : undefined,
         executablePath: executableResolution.executablePath,
         browserArgs: config.chromiumArgs,
+        browser: config.browser,
         allowDangerousBrowserArgs: config.allowDangerousBrowserArgs,
         userDataDir: config.userDataDir,
         ephemeral: config.ephemeral,
+        linkCode: config.linkCode,
         logConsole: config.logConsole,
         logConsoleErrors: config.logConsoleErrors,
         blockCrashLogs: config.blockCrashLogs,
         blockAssets: config.blockAssets,
         safeMode: config.safeMode,
+        lightpanda: config.useLightpanda ? { experimentalWhatsApp: true, ...config.lightpanda } : undefined,
         licenseKey: config.licenseKey as any,
+        licenseConfig: config.licenseConfig,
+        patchConfig: { ghPatch: config.ghPatch, cachedPatch: config.cachedPatch },
+        calling: config.calling,
+        callMediaHost: makeDefaultCallMediaHost(),
+        sandboxPolicy,
+        executionSandbox,
+        memoryObservation: (observability, getBrowserProcessId) => observeBrowserProcessMemory(
+            observability,
+            getBrowserProcessId,
+            { attributes: { session: config.sessionId } },
+        ),
     });
 
     server.setReadinessProvider(() => ({ ...openwaClient.getReadiness(), state: openwaClient.getState() }));
+    server.setQrProvider(() => openwaClient.getTransport().getCurrentQr());
+    server.setLogoutHandler(() => openwaClient.getTransport().logoutLinkedDevice());
     const detachLaunchNarration = attachLaunchNarration(openwaClient, sink, config.sessionId);
 
+    openwaClient.events.on('launch.auth.qr.expired', () => server.setQR(null));
+    openwaClient.events.on('launch.auth.qr.scanned', () => server.setQR(null));
     openwaClient.events.on('launch.auth.qr.generated', (event) => {
         const qr = event.details?.qr;
         if (!qr) {
@@ -600,12 +615,30 @@ export async function start(parsedArgs: ParsedCliArgs = parseCliArgs()): Promise
         server.setQR(qr);
     });
 
+    openwaClient.events.on('launch.auth.linkCode.generated', (event) => {
+        const linkCode = event.details?.linkCode;
+        if (!linkCode) {
+            return;
+        }
+
+        sink.status({
+            phase: 'launch.auth',
+            sessionId: config.sessionId,
+            detail: 'Link code generated; enter it on the paired phone',
+        });
+        sink.write({
+            level: 'info',
+            message: `Link code (local console only): ${linkCode}`,
+        });
+    });
+
     const client = new ClientFacade({
         client: openwaClient,
         transport: openwaClient.getTransport(),
     });
 
     server.setClient(client as any);
+    server.mountPlugins(openwaClient.plugins);
 
     const runtimeBridgeListeners = new Set<(event: string, value: any) => void>();
     const runtimeEventPublishers: RuntimeEventPublisher[] = [
@@ -639,22 +672,32 @@ export async function start(parsedArgs: ParsedCliArgs = parseCliArgs()): Promise
         });
     }
 
-    openwaClient.events.on('launch.browser.init.after', async () => {
+    const handleBrowserInit = async () => {
         const page = openwaClient.getTransport().getPage();
         if (page) {
             await server.setPage(page as any).catch(() => {});
         }
-    });
+    };
+    openwaClient.events.on('launch.browser.init.after', handleBrowserInit);
+
+    let disposed = false;
+    const dispose = () => {
+        if (disposed) return;
+        disposed = true;
+        detachRuntimeBridge();
+        openwaClient.events.off('launch.browser.init.after', handleBrowserInit);
+        runtimeBridgeListeners.clear();
+    };
 
     try {
       await client.start();
     } catch (startError) {
       const msg = startError instanceof Error ? startError.message : String(startError);
       sink.write({ level: 'error', message: `Bootstrap failed: ${msg}` });
-      sink.write({ level: 'warn', message: 'Session kept alive for debugging. Browser page is still open.' });
+      sink.write({ level: 'warn', message: 'The API server is still running for inspection; the client failed to start.' });
       sink.write({ level: 'warn', message: 'The server is running — use /health and /api-docs to inspect state.' });
       detachLaunchNarration();
-      return { server, client, config, events: openwaClient.events };
+      return { server, client, config, events: openwaClient.events, dispose };
     }
 
     const readiness = openwaClient.getReadiness();
@@ -669,10 +712,15 @@ export async function start(parsedArgs: ParsedCliArgs = parseCliArgs()): Promise
     });
 
     detachLaunchNarration();
-    return { server, client, config, events: openwaClient.events };
+    return { server, client, config, events: openwaClient.events, dispose };
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<CliRuntimeResult | void> {
+    if (argv[0] === 'init') {
+        const { initProject } = await import('./cli/init');
+        await initProject(argv.slice(1));
+        return;
+    }
     const parsedArgs = parseCliArgs(argv);
 
     if (parsedArgs.pm2) {

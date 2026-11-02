@@ -15,11 +15,25 @@ export interface LightpandaOptions {
     host?: string;
     startupTimeoutMs?: number;
     disableTelemetry?: boolean;
+    /** Enable ephemeral worker/crypto bridges for WhatsApp QR exploration. */
+    experimentalWhatsApp?: boolean;
+}
+
+export interface BrowserProvisionOptions {
+    /** Managed browser to provision when no executablePath is supplied. */
+    kind?: 'chrome' | 'chromium';
+    /** Download the selected browser when missing, or require an existing installation. */
+    download?: 'auto' | 'never';
+    /** Defaults to a per-user cache; Chrome/Chromium also honor PUPPETEER_CACHE_DIR. */
+    cacheDirectory?: string;
+    /** Optional Chrome for Testing or Chromium mirror. HTTP(S)_PROXY and NO_PROXY apply. */
+    downloadBaseUrl?: string;
 }
 
 export interface LaunchOptions {
     headless?: boolean;
     executablePath?: string;
+    browser?: BrowserProvisionOptions;
     args?: string[];
     proxy?: { server: string; username?: string; password?: string };
     userDataDir?: string;

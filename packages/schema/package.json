@@ -1,16 +1,18 @@
 {
   "name": "@open-wa/schema",
-  "version": "5.0.0-alpha.7",
+  "version": "5.10.0",
   "type": "module",
   "description": "Zod-based schema definitions for open-wa",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
-  "types": "./dist/index.d.ts",
+  "types": "./dist/index.d.mts",
   "files": [
+    "src",
     "dist"
   ],
   "exports": {
     ".": {
+      "bun": "./src/index.ts",
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
@@ -21,6 +23,7 @@
       }
     },
     "./generated": {
+      "bun": "./src/generated/index.ts",
       "require": {
         "types": "./dist/generated/index.d.cts",
         "default": "./dist/generated/index.cjs"
@@ -31,6 +34,7 @@
       }
     },
     "./implementor": {
+      "bun": "./src/implementor.ts",
       "require": {
         "types": "./dist/implementor.d.cts",
         "default": "./dist/implementor.cjs"
@@ -41,6 +45,7 @@
       }
     },
     "./methods": {
+      "bun": "./src/methods/index.ts",
       "require": {
         "types": "./dist/methods/index.d.cts",
         "default": "./dist/methods/index.cjs"
@@ -51,6 +56,7 @@
       }
     },
     "./http-manifest": {
+      "bun": "./src/http-manifest.ts",
       "require": {
         "types": "./dist/http-manifest.d.cts",
         "default": "./dist/http-manifest.cjs"
@@ -59,10 +65,32 @@
         "types": "./dist/http-manifest.d.mts",
         "default": "./dist/http-manifest.mjs"
       }
+    },
+    "./calling-media": {
+      "bun": "./src/calling-media.ts",
+      "import": {
+        "types": "./dist/calling-media.d.mts",
+        "default": "./dist/calling-media.mjs"
+      },
+      "require": {
+        "types": "./dist/calling-media.d.cts",
+        "default": "./dist/calling-media.cjs"
+      }
+    },
+    "./interactive": {
+      "bun": "./src/interactive.ts",
+      "import": {
+        "types": "./dist/interactive.d.mts",
+        "default": "./dist/interactive.mjs"
+      },
+      "require": {
+        "types": "./dist/interactive.d.cts",
+        "default": "./dist/interactive.cjs"
+      }
     }
   },
   "scripts": {
-    "generate": "tsx scripts/gen-openapi.ts && tsx scripts/gen-types.ts && tsx scripts/gen-client-implementation.ts && tsx scripts/gen-client-reference-docs.ts",
+    "generate": "tsx scripts/gen-asyncapi.ts && tsx scripts/gen-openapi.ts && tsx scripts/gen-types.ts && tsx scripts/gen-client-implementation.ts && tsx scripts/gen-client-reference-docs.ts",
     "build": "pnpm generate && tsdown",
     "dev": "tsdown --watch",
     "lint": "oxlint src scripts",
@@ -72,11 +100,12 @@
     "ci": "pnpm verify && pnpm test:contracts && pnpm build"
   },
   "dependencies": {
-    "@asteasolutions/zod-to-openapi": "^8.5.0",
+    "@asteasolutions/zod-to-openapi": "^9.1.0",
     "@open-wa/config": "workspace:*",
     "@open-wa/utils": "workspace:*",
     "zod": "catalog:",
-    "zod-to-json-schema": "^3.22.3"
+    "zod-to-json-schema": "^3.25.2",
+    "effect": "catalog:"
   },
   "devDependencies": {
     "ts-node": "catalog:",
@@ -84,10 +113,83 @@
     "vitest": "catalog:"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      ".": {
+        "require": {
+          "types": "./dist/index.d.cts",
+          "default": "./dist/index.cjs"
+        },
+        "import": {
+          "types": "./dist/index.d.mts",
+          "default": "./dist/index.mjs"
+        }
+      },
+      "./generated": {
+        "require": {
+          "types": "./dist/generated/index.d.cts",
+          "default": "./dist/generated/index.cjs"
+        },
+        "import": {
+          "types": "./dist/generated/index.d.mts",
+          "default": "./dist/generated/index.mjs"
+        }
+      },
+      "./implementor": {
+        "require": {
+          "types": "./dist/implementor.d.cts",
+          "default": "./dist/implementor.cjs"
+        },
+        "import": {
+          "types": "./dist/implementor.d.mts",
+          "default": "./dist/implementor.mjs"
+        }
+      },
+      "./methods": {
+        "require": {
+          "types": "./dist/methods/index.d.cts",
+          "default": "./dist/methods/index.cjs"
+        },
+        "import": {
+          "types": "./dist/methods/index.d.mts",
+          "default": "./dist/methods/index.mjs"
+        }
+      },
+      "./http-manifest": {
+        "require": {
+          "types": "./dist/http-manifest.d.cts",
+          "default": "./dist/http-manifest.cjs"
+        },
+        "import": {
+          "types": "./dist/http-manifest.d.mts",
+          "default": "./dist/http-manifest.mjs"
+        }
+      },
+      "./calling-media": {
+        "import": {
+          "types": "./dist/calling-media.d.mts",
+          "default": "./dist/calling-media.mjs"
+        },
+        "require": {
+          "types": "./dist/calling-media.d.cts",
+          "default": "./dist/calling-media.cjs"
+        }
+      },
+      "./interactive": {
+        "import": {
+          "types": "./dist/interactive.d.mts",
+          "default": "./dist/interactive.mjs"
+        },
+        "require": {
+          "types": "./dist/interactive.d.cts",
+          "default": "./dist/interactive.cjs"
+        }
+      }
+    }
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/open-wa/wa-automate-nodejs.git"
-  }
+  },
+  "license": "SEE LICENSE IN LICENSE.md"
 }
