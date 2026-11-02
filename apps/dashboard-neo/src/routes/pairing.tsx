@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useCallback, useEffect, useState } from "react"
 import { toDataURL } from "qrcode"
-import { apiFetch, getApiUrl, setApiKey } from "@/lib/api-client"
+import { apiFetch, getApiKey, getApiUrl, setApiKey } from "@/lib/api-client"
 
 export const Route = createFileRoute("/pairing")({ component: PairingPage })
 
@@ -18,6 +18,10 @@ function PairingPage() {
   const [error, setError] = useState<string | null>(null)
   const [loggingOut, setLoggingOut] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState("")
+  const [activeKey, setActiveKey] = useState(getApiKey())
+  const [copiedKey, setCopiedKey] = useState(false)
+  const [keyNotice, setKeyNotice] = useState<string | null>(null)
+  const [generatingKey, setGeneratingKey] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
@@ -32,6 +36,7 @@ function PairingPage() {
             const foundKey = data.apiKey || data.key
             if (foundKey) {
               setApiKey(foundKey)
+              setActiveKey(foundKey)
               healthResponse = await apiFetch(`${base}/health`, { signal: AbortSignal.timeout(5000) })
             }
           }
@@ -53,6 +58,7 @@ function PairingPage() {
       }
       setStatus({ connected: health.connected === true, ready, state: health.session?.state ?? "UNKNOWN", qr })
       setError(null)
+      setActiveKey(getApiKey())
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Cannot reach OpenWA")
     }
@@ -74,6 +80,49 @@ function PairingPage() {
     }
     return () => { active = false }
   }, [status?.qr])
+
+  const handleGenerateKey = async () => {
+    try {
+      setGeneratingKey(true)
+      const res = await fetch(`${getApiUrl()}/api-key/generate`, { method: "POST" })
+      if (!res.ok) throw new Error(`Failed to generate key (HTTP ${res.status})`)
+      const data = (await res.json()) as { apiKey?: string; key?: string }
+      const newKey = data.apiKey || data.key
+      if (!newKey) throw new Error("No API key returned")
+      setApiKey(newKey)
+      setActiveKey(newKey)
+      setApiKeyInput(newKey)
+      setKeyNotice("New API key generated and connected!")
+      setTimeout(() => setKeyNotice(null), 4000)
+      void refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate key")
+    } finally {
+      setGeneratingKey(false)
+    }
+  }
+
+  const handleAutoFillKey = async () => {
+    try {
+      const res = await fetch(`${getApiUrl()}/api-key`)
+      if (res.ok) {
+        const data = (await res.json()) as { apiKey?: string; key?: string }
+        const key = data.apiKey || data.key
+        if (key) {
+          setApiKey(key)
+          setActiveKey(key)
+          setApiKeyInput(key)
+          setKeyNotice("API key auto-filled from server!")
+          setTimeout(() => setKeyNotice(null), 4000)
+          void refresh()
+          return
+        }
+      }
+      setError("Could not auto-fetch API key from server")
+    } catch {
+      setError("Could not auto-fetch API key from server")
+    }
+  }
 
   const logout = async () => {
     if (!window.confirm("Unlink this OpenWA device from WhatsApp? You will need to scan a new QR code.")) return
@@ -106,9 +155,12 @@ function PairingPage() {
             className="mb-6 space-y-3"
             onSubmit={(event) => {
               event.preventDefault()
-              setApiKey(apiKeyInput.trim())
-              setApiKeyInput("")
-              void refresh()
+              if (apiKeyInput.trim()) {
+                setApiKey(apiKeyInput.trim())
+                setActiveKey(apiKeyInput.trim())
+                setApiKeyInput("")
+                void refresh()
+              }
             }}
           >
             <label htmlFor="pairing-api-key" className="block text-sm font-medium">OpenWA API key</label>
@@ -124,25 +176,18 @@ function PairingPage() {
               />
               <button
                 type="button"
-                onClick={async () => {
-                  try {
-                    const res = await fetch(`${getApiUrl()}/api-key`)
-                    if (res.ok) {
-                      const data = (await res.json()) as { apiKey?: string; key?: string }
-                      const key = data.apiKey || data.key
-                      if (key) {
-                        setApiKeyInput(key)
-                        setApiKey(key)
-                        void refresh()
-                      }
-                    }
-                  } catch {
-                    setError("Could not auto-fetch API key from server")
-                  }
-                }}
+                onClick={() => void handleAutoFillKey()}
                 className="rounded-md border bg-muted px-3 py-2 text-xs font-medium hover:bg-muted/80"
               >
                 Auto-fill
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleGenerateKey()}
+                disabled={generatingKey}
+                className="rounded-md border bg-secondary px-3 py-2 text-xs font-medium hover:bg-secondary/80 disabled:opacity-50"
+              >
+                {generatingKey ? "Generating..." : "Generate"}
               </button>
             </div>
             <button type="submit" disabled={!apiKeyInput.trim()} className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
@@ -172,6 +217,46 @@ function PairingPage() {
         ) : (
           <p className="mt-6 text-sm text-muted-foreground">Waiting for a pairing code…</p>
         )}
+
+        {/* API Key management section */}
+        <div className="mt-6 border-t pt-4">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>API Key</span>
+            {activeKey ? (
+              <span className="font-mono text-[11px] text-foreground">
+                {activeKey.slice(0, 8)}...{activeKey.slice(-6)}
+              </span>
+            ) : (
+              <span className="italic text-muted-foreground">Not set</span>
+            )}
+          </div>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => void handleGenerateKey()}
+              disabled={generatingKey}
+              className="flex-1 rounded-md border bg-muted/60 px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+            >
+              {generatingKey ? "Generating…" : "Generate New Key"}
+            </button>
+            {activeKey && (
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard.writeText(activeKey)
+                  setCopiedKey(true)
+                  setTimeout(() => setCopiedKey(false), 2000)
+                }}
+                className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+              >
+                {copiedKey ? "Copied" : "Copy key"}
+              </button>
+            )}
+          </div>
+          {keyNotice && (
+            <p className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 font-medium">{keyNotice}</p>
+          )}
+        </div>
       </div>
       {error && error !== "API key required" && <p role="alert" className="text-sm text-destructive">{error}</p>}
     </div>

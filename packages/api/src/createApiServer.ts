@@ -64,8 +64,10 @@ function isPublicRoute(method: string, path: string): boolean {
     || path === '/dashboard'
     || path.startsWith('/dashboard/')
     || path === '/api-key'
+    || path === '/api-key/generate'
     || path === '/auth/api-key'
-    || path === '/api/key';
+    || path === '/api/key'
+    || path === '/api/key/generate';
 }
 
 export class ApiServer {
@@ -425,8 +427,22 @@ export class ApiServer {
     // plugins initialize. Swap the delegate instead of mutating its matcher.
     this.app.all('/plugins/*', (c) => this.pluginApp.fetch(c.req.raw, c.env));
 
+    const handleApiKeyGenerate = (c: any) => {
+      this.config.apiKey = randomBytes(24).toString('base64url');
+      if (c.req.query('format') === 'text' || c.req.header('Accept') === 'text/plain') {
+        return c.text(this.config.apiKey);
+      }
+      return c.json({
+        apiKey: this.config.apiKey,
+        key: this.config.apiKey,
+        status: 'ok',
+        generated: true,
+      });
+    };
+
     const handleApiKeyRequest = (c: any) => {
-      if (!this.config.apiKey) {
+      const shouldGenerate = c.req.query('generate') === 'true' || c.req.query('new') === 'true';
+      if (!this.config.apiKey || shouldGenerate) {
         this.config.apiKey = randomBytes(24).toString('base64url');
       }
       if (c.req.query('format') === 'text' || c.req.header('Accept') === 'text/plain') {
@@ -436,12 +452,17 @@ export class ApiServer {
         apiKey: this.config.apiKey,
         key: this.config.apiKey,
         status: 'ok',
+        generated: shouldGenerate,
       });
     };
 
     this.app.get('/api-key', handleApiKeyRequest);
+    this.app.post('/api-key', handleApiKeyGenerate);
+    this.app.get('/api-key/generate', handleApiKeyGenerate);
+    this.app.post('/api-key/generate', handleApiKeyGenerate);
     this.app.get('/auth/api-key', handleApiKeyRequest);
     this.app.get('/api/key', handleApiKeyRequest);
+    this.app.post('/api/key/generate', handleApiKeyGenerate);
 
     this.app.get('/health/live', (c) => c.json({ status: 'ok' }));
 

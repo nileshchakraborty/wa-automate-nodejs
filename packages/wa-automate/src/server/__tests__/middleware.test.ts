@@ -132,6 +132,13 @@ describe('Hono Middleware', () => {
       expect(typeof body.apiKey).toBe('string');
       expect(body.apiKey.length).toBeGreaterThan(16);
       expect(body.status).toBe('ok');
+
+      // Test generating a new key
+      const postGenRes = await server.getApp().request('/api-key/generate', { method: 'POST' });
+      expect(postGenRes.status).toBe(200);
+      const postGenBody = (await postGenRes.json()) as { apiKey: string; key: string; status: string; generated: boolean };
+      expect(postGenBody.generated).toBe(true);
+      expect(postGenBody.apiKey).not.toBe(body.apiKey);
     });
 
     it('serves the current browser QR and does not reuse a stale cached code', async () => {
