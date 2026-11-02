@@ -453,12 +453,12 @@ export const ConfigSchema = z.object({
   // Stickers & Messaging
   stickerServerEndpoint: z
     .union([z.string(), z.boolean()])
-    .default('https://sticker-api.openwa.dev')
+    .default(false)
     .describe('Sticker server endpoint.'),
 
   autoEmoji: z.union([z.string(), z.literal(false)]).default(':').describe('Automatic emoji detection character.'),
 
-  linkParser: z.string().default('https://link.openwa.cloud/api').describe('URL of serverless meta grabber.'),
+  linkParser: z.string().default('').describe('URL of serverless meta grabber.'),
 
   // Host hooks run before plugin event handlers and actions.
   hooks: HooksConfigSchema.optional().describe('Host hooks and chat restrictions for plugins.'),

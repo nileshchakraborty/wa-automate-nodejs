@@ -3049,6 +3049,19 @@ export class Transport {
       }
     }
 
+    // Default: use core bundled patches (offline, zero external network dependency) unless explicit remote patch requested
+    if (this.patchConfig.ghPatch !== true && this.patchConfig.cachedPatch !== false) {
+      try {
+        const bundled = await this.loadBundledLivePatches();
+        if (bundled.data.length > 0) {
+          this.logger.info('live_patch_loaded_from_bundled', { tag: bundled.tag, patchCount: bundled.data.length });
+          return { data: bundled.data, tag: bundled.tag, source: 'cached' };
+        }
+      } catch (err) {
+        this.logger.debug('bundled_patches_load_failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     const result = await this.fetchFreshLivePatches(sessionInfo);
     this.logger.info('live_patch_downloaded', {
       source: 'remote',
