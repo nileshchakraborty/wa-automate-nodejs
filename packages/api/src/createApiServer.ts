@@ -229,7 +229,9 @@ export class ApiServer {
       if (routeAuth === 'host') {
         pluginApp.use(`/plugins/${name}/*`, async (c, next) => {
           if (this.config.apiKey) {
-            if (c.req.header('X-API-Key') !== this.config.apiKey) return c.json({ error: 'Invalid or missing API key.' }, 401);
+            const expectedKey = this.config.apiKey.trim().replace(/\\n$/, '').trim();
+            const candidateKey = c.req.header('X-API-Key')?.trim().replace(/\\n$/, '').trim();
+            if (!candidateKey || candidateKey !== expectedKey) return c.json({ error: 'Invalid or missing API key.' }, 401);
           } else {
             const address = getConnInfo(c).remote.address;
             if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address ?? '')) {

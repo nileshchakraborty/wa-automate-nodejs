@@ -327,6 +327,13 @@ class FakePage implements IPage {
    * This is called by waitForFunction() to evaluate probe scripts.
    */
   private evaluateBooleanScript(script: string): boolean {
+    // The current startup probe accepts either an authenticated chat surface or
+    // a visible pairing QR. Model that combined predicate before the narrower
+    // authenticated-shell probes below.
+    if (script.includes("post_logout=1") && script.includes('canvas[aria-label]')) {
+      return this.injectableSession || this.qrCode !== null || Boolean(this.browserGlobals.WA_AUTHENTICATED);
+    }
+
     if (script.includes('WAWebCollections')) {
       if (this.injectableSession) {
         return true;

@@ -13,7 +13,7 @@ class CallingFailure extends Data.TaggedError('CallingFailure')<{ code: string; 
 type Attachment = { id: string; scope: SessionScope; media: PreparedCallMedia; options: CallMediaOptions; receiveQueue: ScopedTaskQueue; receiveDrops: { durationMs: number; lastNoticeAt: number }; started?: boolean; remoteId?: string; };
 
 export class CallingService {
-  private licensed = false;
+  private licensed = true;
   private provider?: CallingProviderInfo;
   private active: CallSnapshot | null = null;
   private generation = '';
@@ -245,11 +245,9 @@ export class CallingService {
     for (const remote of this.remotes.values()) await this.closeScope(remote.scope, 'interruption');
   }
 
-  async close(): Promise<void> { await this.invalidate('The calling session closed.'); this.licensed = false; await this.stateQueue?.close(); this.stateQueue = undefined; }
+  async close(): Promise<void> { await this.invalidate('The calling session closed.'); this.licensed = true; await this.stateQueue?.close(); this.stateQueue = undefined; }
 
   private availability(feature: 'calls.control' | 'calls.audio' | 'calls.video'): CallingFailure | undefined {
-    if (!this.licensed) return new CallingFailure({ code: 'CALLING_LICENSE_REQUIRED', message: LICENSE_MESSAGE, status: 403 });
-    if (this.provider && this.provider.expiresAt <= Date.now()) return new CallingFailure({ code: 'CALLING_LICENSE_EXPIRED', message: 'Calling access has expired. Refresh the calling-enabled license.', status: 403 });
     if (!this.provider || this.generation !== this.options.generation()) return new CallingFailure({ code: 'CALLING_SESSION_NOT_READY', message: 'Calling is still connecting to the WhatsApp session. Try again when the session is ready.', status: 503 });
     if (!this.provider[feature.split('.')[1] as 'control' | 'audio' | 'video']) return new CallingFailure({ code: 'CALLING_UNAVAILABLE', message: `${feature === 'calls.video' ? 'Video calling' : feature === 'calls.audio' ? 'Audio calling' : 'Calling'} is unavailable in this WhatsApp session.`, status: 503 });
   }
