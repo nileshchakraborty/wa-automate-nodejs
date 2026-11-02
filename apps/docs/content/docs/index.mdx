@@ -1,11 +1,18 @@
 ---
-title: open-wa docs
-description: Start the Easy API, write custom Node.js code, connect integrations, and find the API reference.
+title: WhatsApp API documentation for Node.js | open-wa
+description: Set up the self-hosted open-wa WhatsApp API. Send messages from Node.js or HTTP, receive webhooks, connect integrations, and browse the API reference.
 ---
 
 # open-wa / wa-automate
 
-Use these docs to get a WhatsApp session running, connect it to your app or helpdesk, and look up exact API methods when you need them.
+open-wa is a self-hosted WhatsApp API and Node.js library for developers. Use these docs to link a WhatsApp account, send messages from your application, receive events, and connect your helpdesk.
+
+## Start here
+
+- Use **[Quick start](/docs/getting-started/quickstart)** if you want to start the API, authenticate WhatsApp, and send your first message.
+- Use **[Custom Code](/docs/getting-started/custom-code)** if you are embedding the library in your own Node.js project.
+- Use **[Socket Client](/docs/client-and-integrations/socket-client)** if you want to connect to a remote Easy API instance.
+- Use **[Cloudflare Session Proxy](/docs/client-and-integrations/cf-proxy)** if you want remote session access without exposing a public port.
 
 ## What you can build
 
@@ -19,44 +26,14 @@ Use these docs to get a WhatsApp session running, connect it to your app or help
 ## Prerequisites
 
 - **Node.js** >= 22.21.1
-- **npm** or **pnpm** (pnpm >= 10.25.0 for repo development)
+- **npm** for released packages, or **pnpm 11.9.0** for repo development
 - A WhatsApp account on a phone that can stay connected
 
-## v5 alpha status
+## Version covered by these docs
 
-<Callout type="warning">
-v5 is currently in alpha. Use v4 (4.76.0) for production systems unless you are intentionally testing v5.
-</Callout>
+These docs cover **v5**, which has stable releases. See the [changelog](/changelog) for the current release and its changes.
 
-The current stable line is **v4.76.0**. v5 is the new package line, but it is still alpha:
-
-```bash
-# Production: use v4
-npx @open-wa/wa-automate@4.76.0
-
-# Testing: use v5 alpha
-npx @open-wa/wa-automate
-```
-
-### What changed in v5
-
-- Monorepo architecture with separate packages
-- Pluggable browser drivers (Puppeteer, Playwright, Lightpanda)
-- `createClient` as the new public contract
-- Plugin system with SDK for reusable integrations
-- Built-in MCP server for AI agent integration
-
-### When to use v5 vs v4
-
-- **v4**: Production systems, mature deployments, existing integrations
-- **v5**: Testing new features, contributing to development, fresh projects willing to track alpha changes
-
-## Start here
-
-- Use **[Quick start](/docs/getting-started/quickstart)** if you want to start the API, authenticate WhatsApp, and send your first message.
-- Use **[Custom Code](/docs/getting-started/custom-code)** if you are embedding the library in your own Node.js project.
-- Use **[Socket Client](/docs/client-and-integrations/socket-client)** if you want to connect to a remote Easy API instance.
-- Use **[Cloudflare Session Proxy](/docs/client-and-integrations/cf-proxy)** if you want remote session access without exposing a public port.
+Use the version installed in your application when comparing method contracts. Choose the `alpha` tag only for deliberate prerelease work.
 
 ## Documentation map
 
@@ -71,10 +48,10 @@ npx @open-wa/wa-automate
 ## Legal and Risk Context
 
 <Callout type="danger">
-This project is unofficial and is not affiliated with WhatsApp or Meta. Use it at your own risk. By using this project you agree to the Terms of Service.
+This project is unofficial and has no affiliation with WhatsApp or Meta. You accept the risk when you use it. When you use this project, you agree to the Terms of Service.
 </Callout>
 
-- Using automation tools carries a risk of account restriction or ban
+- Automation tools can cause an account restriction or ban
 - Check your local laws regarding cryptographic software before use
 - See the [Hippocratic + Do Not Harm License](https://github.com/open-wa/wa-automate-nodejs/blob/master/LICENSE.md) for full terms
 
@@ -82,7 +59,7 @@ This project is unofficial and is not affiliated with WhatsApp or Meta. Use it a
 
 - **Documentation**: https://openwa.dev
 - **Discord**: https://discord.gg/dnpp72a
-- **Get a license key**: https://openwa.page.link/key
+- **Get a license key**: [Licence options](/docs/licensing/pricing)
 
 ## If you came from the old docs
 

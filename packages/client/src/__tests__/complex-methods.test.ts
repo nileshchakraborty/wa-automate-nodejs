@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import axios from 'axios';
 import { decryptMedia as decryptMediaBuffer } from '@open-wa/decrypt';
-import { Client } from '../Client.js';
+import { Client } from '../Client';
 import type { OpenWAClient, OpenWAEventMap, STATE, Transport } from '@open-wa/core';
 import { HyperEmitter } from '@open-wa/hyperemitter';
 
@@ -18,7 +18,7 @@ function createTestClient() {
     events,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
     session: {} as any,
-    plugins: {} as any,
+    plugins: { bindRuntime: vi.fn() } as any,
     config: {},
     registerFinalizationHook: vi.fn(() => () => undefined),
     start: vi.fn(),
@@ -31,6 +31,11 @@ function createTestClient() {
   };
 
   const transport: Transport = {
+    setPortableMessageHandler: vi.fn((handler) => {
+      const listener = ({ message }: any) => handler(message);
+      events.on('message.received', listener);
+      return () => events.off('message.received', listener);
+    }),
     evaluate: vi.fn(),
   } as any;
 
@@ -81,12 +86,12 @@ describe('Client complex methods', () => {
     expect(result).toBe(outputPath);
   });
 
-  it('sendFileFromUrl is explicit about missing runtime support', async () => {
-    await expect(
-      client.sendFileFromUrl('123@c.us' as any, 'https://example.com/file.txt', 'file.txt', 'caption')
-    ).rejects.toThrow(/not supported by the shipped browser runtime/i);
-
-    expect(axios.get).not.toHaveBeenCalled();
+  it('sendFileFromUrl sends downloaded bytes with media options', async () => {
+    vi.mocked(axios.get).mockResolvedValue({ data: Buffer.from('hello'), headers: new Headers({ 'content-type': 'text/plain' }) });
+    client.sendFile = vi.fn().mockResolvedValue('true_123@c.us_ABC' as any);
+    const result = await client.sendFileFromUrl('123@c.us' as any, 'https://example.com/file.txt', 'file.txt', { caption: 'caption' });
+    expect(client.sendFile).toHaveBeenCalledWith('123@c.us', 'data:text/plain;base64,aGVsbG8=', 'file.txt', { caption: 'caption' });
+    expect(result).toBe('true_123@c.us_ABC');
   });
 
   it('loadEarlierMessages keeps compatibility while accepting count/includeMe', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "@open-wa/utils",
-  "version": "5.0.0-alpha.7",
+  "version": "5.10.0",
   "description": "Shared utility functions for open-wa",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
@@ -8,12 +8,14 @@
   "type": "module",
   "exports": {
     ".": {
+      "bun": "./src/index.ts",
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs"
     }
   },
   "files": [
+    "src",
     "dist"
   ],
   "scripts": {
@@ -24,8 +26,8 @@
   },
   "dependencies": {
     "json5": "^2.2.3",
-    "pidtree": "^0.6.0",
-    "pidusage": "^3.0.2"
+    "pidtree": "^1.0.0",
+    "pidusage": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "catalog:",
@@ -33,7 +35,14 @@
     "typescript": "catalog:"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "require": "./dist/index.cjs"
+      }
+    }
   },
   "keywords": [
     "open-wa",
@@ -43,5 +52,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/open-wa/wa-automate-nodejs.git"
-  }
+  },
+  "license": "SEE LICENSE IN LICENSE.md"
 }

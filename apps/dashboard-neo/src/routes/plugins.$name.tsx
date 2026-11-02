@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { Plug, Puzzle, FileText } from "lucide-react"
 import { apiFetch } from "@/lib/api-client"
+import { PluginPage } from "@/components/plugin-page"
 
 interface PluginPageData {
   name: string
@@ -13,6 +14,7 @@ interface PluginPageData {
     title: string
     icon?: string
     description?: string
+    module?: string
   }>
   tools: string[]
 }
@@ -20,9 +22,7 @@ interface PluginPageData {
 /**
  * Dynamic plugin page route.
  *
- * This route catches /plugins/:name and renders a plugin status view.
- * In v1, this shows plugin info fetched from the manifest.
- * Future: lazy-loaded React components from plugins.
+ * Renders a plugin-supplied Neo page module, or the plugin's status metadata.
  */
 export const Route = createFileRoute("/plugins/$name")({
   component: PluginPageRoute,
@@ -76,9 +76,9 @@ function PluginPageRoute() {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="flex flex-col items-center gap-3 text-center">
-          <Plug size={48} className="text-muted-foreground opacity-50 mb-2" />
+          <Plug size={48} className="mb-2 text-muted-foreground opacity-50" />
           <h2 className="text-lg font-semibold">Plugin Not Found</h2>
-          <p className="text-sm text-muted-foreground max-w-sm">
+          <p className="max-w-sm text-sm text-muted-foreground">
             {error ?? `No plugin named "${name}" is currently loaded.`}
           </p>
         </div>
@@ -86,8 +86,11 @@ function PluginPageRoute() {
     )
   }
 
+  const page = plugin.pages.find(page => page.path === '/') ?? plugin.pages[0];
+  if (page?.module) return <PluginPage name={name} module={page.module} />;
+
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-2xl">
+    <div className="flex max-w-2xl flex-col gap-6 p-6">
       {/* Plugin Header */}
       <div className="flex items-start gap-4">
         <div className="flex size-12 items-center justify-center rounded-xl bg-primary/10 text-2xl">
@@ -108,14 +111,16 @@ function PluginPageRoute() {
             )}
           </div>
           {plugin.description && (
-            <p className="text-sm text-muted-foreground mt-1">{plugin.description}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {plugin.description}
+            </p>
           )}
         </div>
       </div>
 
       {/* Status Card */}
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="text-sm font-medium mb-3">Status</h3>
+        <h3 className="mb-3 text-sm font-medium">Status</h3>
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-0.5">
             <span className="text-xs text-muted-foreground">Pages</span>
@@ -127,7 +132,9 @@ function PluginPageRoute() {
           </div>
           <div className="flex flex-col gap-0.5">
             <span className="text-xs text-muted-foreground">API Routes</span>
-            <span className="text-sm font-medium">{plugin.hasRoutes ? "Yes" : "No"}</span>
+            <span className="text-sm font-medium">
+              {plugin.hasRoutes ? "Yes" : "No"}
+            </span>
           </div>
         </div>
       </div>
@@ -135,13 +142,19 @@ function PluginPageRoute() {
       {/* Pages List */}
       {plugin.pages.length > 0 && (
         <div className="rounded-lg border bg-card p-4">
-          <h3 className="text-sm font-medium mb-3">Pages</h3>
+          <h3 className="mb-3 text-sm font-medium">Pages</h3>
           <div className="flex flex-col gap-2">
             {plugin.pages.map((page) => (
               <div key={page.path} className="flex items-center gap-2 text-sm">
-                <span>{page.icon ?? <FileText size={16} className="text-muted-foreground" />}</span>
+                <span>
+                  {page.icon ?? (
+                    <FileText size={16} className="text-muted-foreground" />
+                  )}
+                </span>
                 <span>{page.title}</span>
-                <span className="text-xs text-muted-foreground">({page.path})</span>
+                <span className="text-xs text-muted-foreground">
+                  ({page.path})
+                </span>
               </div>
             ))}
           </div>
@@ -151,12 +164,12 @@ function PluginPageRoute() {
       {/* Tools List */}
       {plugin.tools.length > 0 && (
         <div className="rounded-lg border bg-card p-4">
-          <h3 className="text-sm font-medium mb-3">Tools</h3>
+          <h3 className="mb-3 text-sm font-medium">Tools</h3>
           <div className="flex flex-wrap gap-2">
             {plugin.tools.map((tool) => (
               <span
                 key={tool}
-                className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-mono"
+                className="rounded-full bg-muted px-2.5 py-0.5 font-mono text-xs"
               >
                 {tool}
               </span>

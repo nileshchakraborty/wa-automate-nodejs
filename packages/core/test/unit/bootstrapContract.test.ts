@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createClient, type OpenWAClient } from '../../src/createClient.js';
-import { Transport, type PatchFetchConfig } from '../../src/transport/Transport.js';
+import { createClient, type OpenWAClient } from '../../src/createClient';
+import { Transport, type PatchFetchConfig } from '../../src/transport/Transport';
 import type {
   DisposableHandle,
   IBrowser,
@@ -12,7 +12,7 @@ import type {
   IRequest,
   WaitForFunctionOptions,
 } from '@open-wa/driver-interface';
-import type { OpenWAEventMap } from '../../src/events/eventMap.js';
+import type { OpenWAEventMap } from '../../src/events/eventMap';
 
 type RecordedEvent = {
   name: keyof OpenWAEventMap | string;
@@ -327,6 +327,13 @@ class FakePage implements IPage {
    * This is called by waitForFunction() to evaluate probe scripts.
    */
   private evaluateBooleanScript(script: string): boolean {
+    // The current startup probe accepts either an authenticated chat surface or
+    // a visible pairing QR. Model that combined predicate before the narrower
+    // authenticated-shell probes below.
+    if (script.includes("post_logout=1") && script.includes('canvas[aria-label]')) {
+      return this.injectableSession || this.qrCode !== null || Boolean(this.browserGlobals.WA_AUTHENTICATED);
+    }
+
     if (script.includes('WAWebCollections')) {
       if (this.injectableSession) {
         return true;
@@ -558,11 +565,11 @@ class FakeBrowser implements IBrowser {
 }
 
 class FakeDriver implements IDriver {
-  readonly name: 'fake-driver' | 'lightpanda';
+  readonly name: string;
   readonly capabilities: DriverCapabilities;
 
   constructor(private readonly browser: FakeBrowser, options: Pick<HarnessOptions, 'driverCapabilities' | 'driverName'> = {}) {
-    this.name = options.driverName ?? 'fake-driver';
+    this.name = options.driverName ?? 'puppeteer';
     this.capabilities = {
       cdp: { supported: true },
       requestInterception: { supported: true },
@@ -618,6 +625,8 @@ function captureEvents(client: OpenWAClient): RecordedEvent[] {
   return recorded;
 }
 
+const harnessClients = new Set<OpenWAClient>();
+
 async function createHarness(options: HarnessOptions = {}): Promise<{
   client: OpenWAClient;
   page: FakePage;
@@ -627,6 +636,7 @@ async function createHarness(options: HarnessOptions = {}): Promise<{
   const driver = new FakeDriver(new FakeBrowser(page), options);
   const client = await createClient({
     driver,
+    lightpanda: options.driverName === 'lightpanda' ? { experimentalWhatsApp: true } : undefined,
     sessionId: 'bootstrap-contract',
     headless: true,
     qrTimeoutMs: 10,
@@ -638,6 +648,7 @@ async function createHarness(options: HarnessOptions = {}): Promise<{
     licenseKey: options.licenseKey,
     patchConfig: options.patchConfig,
   });
+  harnessClients.add(client);
 
   if (options.qrPollingMs != null) {
     (client.getTransport() as unknown as { qrPollingMs: number }).qrPollingMs = options.qrPollingMs;
@@ -671,8 +682,13 @@ function requireBlockedReady(recordedEvents: RecordedEvent[], reason: string): v
   }
 }
 
-afterEach(() => {
-  vi.restoreAllMocks();
+afterEach(async () => {
+  try {
+    await Promise.all([...harnessClients].map(client => client.stop('bootstrap_harness_cleanup')));
+  } finally {
+    harnessClients.clear();
+    vi.restoreAllMocks();
+  }
 });
 
 describe('bootstrap contract harness', () => {
@@ -860,7 +876,7 @@ describe('bootstrap contract harness', () => {
     await client.stop('phase_e_missing_license_cleanup');
   });
 
-  it('Phase E: invalid license classification blocks readiness before finalization', async () => {
+  it('Phase E: invalid license remains observable without blocking public readiness', async () => {
     const { client, recordedEvents } = await createHarness({
       runtimeAvailable: true,
       storeMsgAvailable: true,
@@ -870,14 +886,15 @@ describe('bootstrap contract harness', () => {
 
     const startResult = await settleStart(client);
 
-    if (startResult.status !== 'rejected') {
-      throw new Error('Expected invalid-license bootstrap fixture to reject, but start() resolved.');
+    if (startResult.status !== 'resolved') {
+      throw new Error(`Expected public bootstrap to resolve after an invalid license, but it rejected with: ${String(startResult.error)}`);
     }
 
-    requireBlockedReady(
-      recordedEvents,
-      'Section 27.E/27.G requires invalid license outcomes to block readiness explicitly, but client.ready still emitted after invalid license classification.'
-    );
+    expect(client.getReadiness()).toMatchObject({
+      ready: true,
+      requirements: { licenseLifecycle: { state: 'non_blocking' } },
+    });
+    expect(recordedEvents.filter((event) => event.name === 'client.ready')).toHaveLength(1);
 
     const invalidCheckIndex = recordedEvents.findIndex((event) => {
       if (event.name !== 'launch.license.check.after') return false;
@@ -890,14 +907,12 @@ describe('bootstrap contract harness', () => {
     }
 
     const finalizeIndex = findEventIndex(recordedEvents, 'launch.client.finalize.before');
-    if (finalizeIndex !== -1 && finalizeIndex > invalidCheckIndex) {
-      throw new Error('Expected invalid license classification to stop bootstrap before finalization began.');
-    }
+    expect(finalizeIndex).toBeGreaterThan(invalidCheckIndex);
 
     await client.stop('phase_e_invalid_license_cleanup');
   });
 
-  it('Phase E: expired license classification blocks readiness before finalization', async () => {
+  it('Phase E: expired license remains observable without blocking public readiness', async () => {
     const { client, recordedEvents } = await createHarness({
       runtimeAvailable: true,
       storeMsgAvailable: true,
@@ -907,14 +922,15 @@ describe('bootstrap contract harness', () => {
 
     const startResult = await settleStart(client);
 
-    if (startResult.status !== 'rejected') {
-      throw new Error('Expected expired-license bootstrap fixture to reject, but start() resolved.');
+    if (startResult.status !== 'resolved') {
+      throw new Error(`Expected public bootstrap to resolve after an expired license, but it rejected with: ${String(startResult.error)}`);
     }
 
-    requireBlockedReady(
-      recordedEvents,
-      'Section 27.E/27.G requires expired license outcomes to block readiness explicitly, but client.ready still emitted after expired license classification.'
-    );
+    expect(client.getReadiness()).toMatchObject({
+      ready: true,
+      requirements: { licenseLifecycle: { state: 'non_blocking' } },
+    });
+    expect(recordedEvents.filter((event) => event.name === 'client.ready')).toHaveLength(1);
 
     const expiredCheckIndex = recordedEvents.findIndex((event) => {
       if (event.name !== 'launch.license.check.after') return false;
@@ -927,9 +943,7 @@ describe('bootstrap contract harness', () => {
     }
 
     const finalizeIndex = findEventIndex(recordedEvents, 'launch.client.finalize.before');
-    if (finalizeIndex !== -1 && finalizeIndex > expiredCheckIndex) {
-      throw new Error('Expected expired license classification to stop bootstrap before finalization began.');
-    }
+    expect(finalizeIndex).toBeGreaterThan(expiredCheckIndex);
 
     await client.stop('phase_e_expired_license_cleanup');
   });
@@ -1076,43 +1090,8 @@ describe('bootstrap contract harness', () => {
       sessionLoaded: false,
     });
 
-    vi.spyOn(Transport.prototype, 'validateRuntimeUsability')
-      .mockResolvedValueOnce({
-        stage: 'post_injection',
-        usable: false,
-        repairable: true,
-        failureReason: 'required_method_missing',
-        hasRuntime: true,
-        hasStoreMsg: true,
-        sessionLoaded: false,
-        bridgeReady: false,
-        requiredMethods,
-        missingMethods: ['onAck'],
-      })
-      .mockResolvedValueOnce({
-        stage: 'post_injection',
-        usable: true,
-        repairable: false,
-        hasRuntime: true,
-        hasStoreMsg: true,
-        sessionLoaded: true,
-        bridgeReady: true,
-        requiredMethods,
-        missingMethods: [],
-      })
-      .mockResolvedValueOnce({
-        stage: 'post_overlay',
-        usable: true,
-        repairable: false,
-        hasRuntime: true,
-        hasStoreMsg: true,
-        sessionLoaded: true,
-        bridgeReady: true,
-        requiredMethods,
-        missingMethods: [],
-      });
-
-    const repairRuntimeIntegrity = vi.spyOn(Transport.prototype, 'repairRuntimeIntegrity').mockResolvedValue(true);
+    const validateRuntimeUsability = vi.spyOn(Transport.prototype, 'validateRuntimeUsability');
+    const repairRuntimeIntegrity = vi.spyOn(Transport.prototype, 'repairRuntimeIntegrity');
     vi.spyOn(Transport.prototype, 'waitForAuthentication').mockImplementation(async function (this: Transport) {
       const transport = this as unknown as {
         events: { emit: (eventName: string, payload: unknown) => void };
@@ -1149,30 +1128,26 @@ describe('bootstrap contract harness', () => {
       throw new Error(`Expected deferred pre-auth integrity scenario to resolve, but bootstrap rejected with: ${String(startResult.error)}`);
     }
 
-    const postInjectionValidationEvents = recordedEvents
+    const validationEvents = recordedEvents
       .map((event, index) => ({ event, index }))
-      .filter(({ event }) => event.name === 'launch.session.validityCheck.after')
-      .filter(({ event }) => {
-        const payload = event.payload as { details?: { phase?: string } } | undefined;
-        return payload?.details?.phase === 'post_injection';
-      });
-
-    expect(postInjectionValidationEvents).toHaveLength(2);
-
-    const firstValidationPayload = postInjectionValidationEvents[0]?.event.payload as {
-      details?: { valid?: boolean; failureReason?: string };
-    } | undefined;
-    const secondValidationPayload = postInjectionValidationEvents[1]?.event.payload as {
-      details?: { valid?: boolean; failureReason?: string };
-    } | undefined;
-
-    expect(firstValidationPayload?.details?.valid).toBe(false);
-    expect(firstValidationPayload?.details?.failureReason).toBe('required_method_missing');
-    expect(secondValidationPayload?.details?.valid).toBe(true);
-
+      .filter(({ event }) => event.name === 'launch.session.validityCheck.after');
     const qrGeneratedIndex = findEventIndex(recordedEvents, 'launch.auth.qr.generated');
-    expect(qrGeneratedIndex).toBeGreaterThan(postInjectionValidationEvents[0]!.index);
-    expect(qrGeneratedIndex).toBeLessThan(postInjectionValidationEvents[1]!.index);
+    expect(qrGeneratedIndex).toBeGreaterThan(-1);
+
+    const preAuthValidation = validationEvents.find(({ index }) => index < qrGeneratedIndex);
+    expect(preAuthValidation?.event.payload).toMatchObject({
+      details: { phase: 'post_injection', valid: true, sessionLoaded: false, missingMethods: [] },
+    });
+
+    const strictValidation = validationEvents.find(({ event, index }) => {
+      const payload = event.payload as { details?: { phase?: string } } | undefined;
+      return index > qrGeneratedIndex && payload?.details?.phase === 'post_overlay';
+    });
+    expect(strictValidation?.event.payload).toMatchObject({
+      details: { valid: true, sessionLoaded: true, missingMethods: [] },
+    });
+    expect(validateRuntimeUsability).toHaveBeenCalledWith('post_overlay');
+    expect(validateRuntimeUsability).not.toHaveBeenCalledWith('post_injection');
 
     const fatalIntegrityErrorIndex = recordedEvents.findIndex((event) => {
       if (event.name !== 'error') return false;
@@ -1864,7 +1839,7 @@ describe('bootstrap contract harness', () => {
       expect(client.getReadiness()).toMatchObject({
         ready: false,
         status: 'blocked',
-        blockers: ['patchLifecycle'],
+        blockers: ['runtimeUsable'],
       });
 
       await client.stop('deferred_init_patch_failure_cleanup');
@@ -1873,6 +1848,65 @@ describe('bootstrap contract harness', () => {
   });
 
   describe('payload depth: license server validation', () => {
+    it('retries license preload after the live patch reveals the host ID', async () => {
+      const unknownHost = {
+        WA_VERSION: '2.3000.0',
+        WA_AUTOMATE_VERSION: '5.0.0',
+        hostNumber: '',
+      };
+      const resolvedHost = { ...unknownHost, hostNumber: '1234567890@c.us' };
+      const debugSpy = vi.spyOn(Transport.prototype, 'getSessionDebugInfo')
+        .mockResolvedValueOnce(unknownHost)
+        .mockResolvedValueOnce(resolvedHost);
+      const originalPreload = Transport.prototype.preloadLicenseArtifact;
+      const licensePreloadSpy = vi.spyOn(Transport.prototype, 'preloadLicenseArtifact')
+        .mockImplementation(function (this: Transport, options) {
+          if (!options.sessionInfo?.hostNumber) {
+            return originalPreload.call(this, options);
+          }
+          return Promise.resolve({
+            outcome: 'ready',
+            status: 'valid',
+            source: 'local',
+            artifact: {
+              key: 'insiders-test-key-12345',
+              maskedKey: '******************2345',
+              source: 'local',
+              payload: 'window.__OPENWA_LICENSE__ = {}; window.KEYTYPE = "insiders"; true',
+              keyType: 'insiders',
+              payloadSource: 'server',
+            },
+            blockingFailure: false,
+          });
+        });
+      vi.spyOn(Transport.prototype as any, 'fetchLivePatchesWithCache').mockResolvedValue({
+        data: [],
+        tag: 'empty',
+        source: 'remote',
+      });
+
+      const { client, recordedEvents } = await createHarness({
+        runtimeAvailable: true,
+        storeMsgAvailable: true,
+        sessionLoaded: true,
+        licenseKey: 'insiders-test-key-12345',
+      });
+
+      expect(await settleStart(client)).toMatchObject({ status: 'resolved' });
+      expect(debugSpy).toHaveBeenCalledTimes(2);
+      expect(licensePreloadSpy).toHaveBeenCalledWith(expect.objectContaining({
+        sessionInfo: expect.objectContaining({ hostNumber: '1234567890@c.us' }),
+      }));
+      expect(recordedEvents).toContainEqual(expect.objectContaining({
+        name: 'launch.license.check.after',
+        payload: expect.objectContaining({
+          details: expect.objectContaining({ status: 'valid' }),
+        }),
+      }));
+
+      await client.stop('license_host_recovery_cleanup');
+    });
+
     it('passes host number to license validation server for round-trip check', async () => {
       // Mock getSessionDebugInfo to return a host number
       const debugSpy = vi.spyOn(

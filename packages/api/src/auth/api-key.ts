@@ -1,9 +1,15 @@
 import type { Context, Next } from 'hono';
 import { timingSafeEqual } from 'node:crypto';
 
+function normalizeKey(key: string): string {
+  return key.trim().replace(/\\n$/, '').trim();
+}
+
 function apiKeysMatch(candidate: string, expected: string): boolean {
-  const candidateBuffer = Buffer.from(candidate);
-  const expectedBuffer = Buffer.from(expected);
+  const normCandidate = normalizeKey(candidate);
+  const normExpected = normalizeKey(expected);
+  const candidateBuffer = Buffer.from(normCandidate);
+  const expectedBuffer = Buffer.from(normExpected);
 
   return candidateBuffer.length === expectedBuffer.length
     && timingSafeEqual(candidateBuffer, expectedBuffer);

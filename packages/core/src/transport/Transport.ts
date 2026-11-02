@@ -1,7 +1,11 @@
+import { PortableSessionController } from './portableSession';
+import { acquireSessionPersistence, type SessionPersistenceConfig } from './sessionPersistence';
+import type { SessionEncryptionOptions } from './sessionEncryption';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type {
   DisposableHandle,
   IConsoleMessage,
@@ -10,20 +14,24 @@ import type {
   IPage,
   IRequest,
   LightpandaOptions,
+  BrowserProvisionOptions,
   WaitForFunctionOptions,
 } from '@open-wa/driver-interface';
 import type { HyperEmitter } from '@open-wa/hyperemitter';
 import type { Logger } from '@open-wa/logger';
-import type { OpenWAEventMap, STATE } from '../events/eventMap.js';
-import { fetchPatches, validateLicense } from './httpClient.js';
-import { InjectionController, type GenerationSnapshot } from './InjectionController.js';
-import { getProgObserverScript, injectInitPatch } from './initPatchScripts.js';
-import { getRuntimeListenerSurfaceEntry, runtimeListenerSurface } from './runtimeListenerSurface.js';
-import { auditWapiHelperAssetRequirements } from './ScriptLoader.js';
-import { chromiumConfig, sanitizeBrowserArgs } from './browserConfig.js';
+import type { OpenWAEventMap, STATE } from '../events/eventMap';
+import { fetchPatches, validateLicense } from './httpClient';
+import { installDocumentRuntime } from '../livePatch/installDocument';
+import { InjectionController, type GenerationSnapshot } from './InjectionController';
+import { getProgObserverScript, injectInitPatch } from './initPatchScripts';
+import { getRuntimeListenerSurfaceEntry, runtimeListenerSurface } from './runtimeListenerSurface';
+import { auditWapiHelperAssetRequirements, ScriptLoader } from './ScriptLoader';
+import { chromiumConfig, sanitizeBrowserArgs } from './browserConfig';
+import { CallingService } from '../calling/CallingService';
+import type { LicenseFeatures } from '@open-wa/schema';
+import { ParticipantChangePatchSchema } from '@open-wa/schema';
 
 export interface PatchFetchConfig {
-  patchesUrl?: string;
   /** Use GitHub raw patches as the primary source instead of the default CDN. */
   ghPatch?: boolean;
   /** @deprecated Prefer `ghPatch`. When false, disables the CDN -> GitHub fallback path. */
@@ -32,7 +40,7 @@ export interface PatchFetchConfig {
 }
 
 export interface LicenseServerConfig {
-  licenseCheckUrl?: string;
+  url?: string;
   offlineLicenseMode?: boolean;
 }
 
@@ -46,7 +54,7 @@ export interface SessionDebugInfo {
   NUM_HASH?: string;
 }
 
-export interface TransportOptions {
+export interface TransportOptions extends SessionPersistenceConfig, SessionEncryptionOptions {
   driver: IDriver;
   events: HyperEmitter<OpenWAEventMap>;
   logger: Logger;
@@ -58,6 +66,7 @@ export interface TransportOptions {
   qrPollingMs?: number;
   navigationTimeoutMs?: number;
   executablePath?: string;
+  browser?: BrowserProvisionOptions;
   watermark?: boolean | { text?: string; color?: string; background?: string; };
   browserArgs?: string[];
   allowDangerousBrowserArgs?: boolean;
@@ -73,6 +82,8 @@ export interface TransportOptions {
   lightpanda?: LightpandaOptions;
   patchConfig?: PatchFetchConfig;
   licenseConfig?: LicenseServerConfig;
+  calling?: import('@open-wa/schema').CallingOptions;
+  callMediaHost?: import('../calling/ports').CallMediaHost;
 }
 
 const CRASH_LOG_URL_FRAGMENTS = [
@@ -84,76 +95,32 @@ const BLOCKED_ASSET_RESOURCE_TYPES = new Set(['image', 'stylesheet', 'font']);
 
 /** JavaScript snippet to extract QR data from the WA Web page */
 const QR_CHECK_SCRIPT = `document.querySelector("canvas[aria-label]")?.parentElement?.getAttribute("data-ref") || null`;
-const INJECTABLE_SESSION_CHECK_SCRIPT = `(() => {
-  try {
-    const debug = window.require && window.require("__debug");
-    return Boolean(debug?.modulesMap?.["WAWebCollections"]);
-  } catch {
-    return false;
-  }
-})()`;
-const PRE_AUTH_SURFACE_READY_CHECK_SCRIPT = `(() => {
-  try {
-    return Boolean(${INJECTABLE_SESSION_CHECK_SCRIPT})
-      || Boolean(${QR_CHECK_SCRIPT});
-  } catch {
-    return false;
-  }
-})()`;
+const PRE_AUTH_SURFACE_READY_CHECK_SCRIPT = `Boolean(
+  document.querySelector('#pane-side')
+  || document.querySelector('[data-testid="chat-list-search"]')
+  || (${QR_CHECK_SCRIPT})
+)`;
 const QR_SELECTOR_PRIMARY = "canvas[aria-label='Scan this QR code to link a device!']";
 const QR_SELECTOR_FALLBACK = 'canvas[aria-label]';
 const PRE_API_HELPER_READY_CHECK_SCRIPT = `Boolean(!['jsSHA','axios','QRCode','Base64','objectHash'].find(x=>!window[x]))`;
 
 const WAPI_RUNTIME_CHECK_SCRIPT = '!!window.WAPI';
 const STORE_MSG_CHECK_SCRIPT = '!!(window.Store && window.Store.Msg)';
-const ATTEMPTING_REAUTH_CHECK_SCRIPT = `!!(
-  typeof localStorage !== 'undefined'
-  && (localStorage['WAToken2'] || localStorage['last-wid-md'])
-)`;
-const SESSION_INVALID_CHECK_SCRIPT = `!!(
-  typeof localStorage !== 'undefined'
-  && Object.prototype.hasOwnProperty.call(localStorage, 'old-logout-cred')
-)`;
 const PHONE_OUT_OF_REACH_CHECK_SCRIPT = `!!(
   typeof document !== 'undefined'
   && document.querySelector('body')
   && document.querySelector('body').innerText.includes('Trying to reach phone')
 )`;
 const LINK_CODE_AVAILABLE_CHECK_SCRIPT = `!!(typeof window.linkCode === 'function')`;
-const LEGACY_IS_INSIDE_CHAT_CHECK_SCRIPT = `!!(
-  !!window.WA_AUTHENTICATED
-  || (document.getElementsByClassName('app')[0]
-    && document.getElementsByClassName('app')[0].attributes
-    && !!document.getElementsByClassName('app')[0].attributes.tabindex)
-  || (document.getElementsByClassName('two')[0]
-    && document.getElementsByClassName('two')[0].attributes
-    && !!document.getElementsByClassName('two')[0].attributes.tabindex)
+const AUTHENTICATED_SHELL_CHECK_SCRIPT = `Boolean(
+  document.querySelector('#pane-side')
+  || document.querySelector('[data-testid="chat-list-search"]')
 )`;
-const AUTHENTICATED_SHELL_CHECK_SCRIPT = `!!(
-  (window.isSessionLoaded && window.isSessionLoaded()) ||
-  window.WA_AUTHENTICATED ||
-  document.querySelector('#pane-side') ||
-  document.querySelector('[aria-label="Search or start a new chat"]') ||
-  document.querySelector('[data-testid="chat-list-search"]') ||
-  (document.getElementsByClassName('app')[0] && document.getElementsByClassName('app')[0].getAttribute('tabindex') != null) ||
-  (document.getElementsByClassName('two')[0] && document.getElementsByClassName('two')[0].getAttribute('tabindex') != null)
-)`;
-const RIPE_SESSION_CHECK_SCRIPT = `(() => {
-  try {
-    return Boolean(
-      !!window.WA_AUTHENTICATED || (document.getElementsByClassName('app')[0] && document.getElementsByClassName('app')[0].attributes && !!document.getElementsByClassName('app')[0].attributes.tabindex) || (document.getElementsByClassName('two')[0] && document.getElementsByClassName('two')[0].attributes && !!document.getElementsByClassName('two')[0].attributes.tabindex)
-    );
-  } catch {
-    return false;
-  }
-})()`;
 const DOCUMENT_READY_CHECK_SCRIPT = `!!(
   typeof document === 'undefined'
   || document.readyState === 'interactive'
   || document.readyState === 'complete'
 )`;
-
-type RuntimeMutationKind = 'runtime_install' | 'runtime_recovery';
 
 const RUNTIME_REPLACEMENT_OBSERVER_SCRIPT = `(() => {
   const root = globalThis;
@@ -206,19 +173,7 @@ const RUNTIME_REPLACEMENT_OBSERVER_SCRIPT = `(() => {
       }
       currentValue = value;
 
-      const lease = root.__OPENWA_RUNTIME_MUTATION_LEASE__;
-      const leaseActive = Boolean(
-        lease
-        && typeof lease.token === 'string'
-        && typeof lease.expiresAt === 'number'
-        && lease.expiresAt > Date.now()
-      );
-
-      if (lease && !leaseActive) {
-        delete root.__OPENWA_RUNTIME_MUTATION_LEASE__;
-      }
-
-      if (previous && value && previous !== value && !leaseActive) {
+      if (previous && value && previous !== value) {
         notifyRuntimeReplacement();
       }
     },
@@ -236,38 +191,13 @@ export interface RuntimeCapabilityProbe {
   sessionLoaded: boolean;
 }
 
-export type AuthSettlementOutcome = 'authenticated' | 'qr_timeout' | 'auth_timeout' | 'invalid_session' | 'phone_out_of_reach' | 'qr_max';
+export type AuthSettlementOutcome = 'authenticated' | 'qr_timeout' | 'auth_timeout' | 'phone_out_of_reach' | 'qr_max';
 
 export interface AuthSettlementResult {
   outcome: AuthSettlementOutcome;
   qrSeen: boolean;
   qrAttempts: number;
   authMethod?: 'qr' | 'link_code' | 'resumed_session';
-}
-
-export interface PostAuthRuntimeReconciliationResult extends RuntimeCapabilityProbe {
-  ripeSessionLoaded: boolean;
-  reinjected: boolean;
-  path: 'fresh_auth' | 'resumed_session';
-}
-
-export type RuntimeValidationStage = 'post_injection' | 'post_patch' | 'post_overlay';
-export type RuntimeValidationFailureReason = 'runtime_missing' | 'store_missing' | 'session_not_loaded' | 'required_method_missing';
-
-export interface RuntimeMethodIntegrityResult {
-  bridgeReady: boolean;
-  requiredMethods: string[];
-  missingMethods: string[];
-}
-
-export interface RuntimeValidationResult extends RuntimeCapabilityProbe {
-  stage: RuntimeValidationStage;
-  usable: boolean;
-  repairable: boolean;
-  bridgeReady: boolean;
-  requiredMethods: string[];
-  missingMethods: string[];
-  failureReason?: RuntimeValidationFailureReason;
 }
 
 export interface TransportOperationalReadinessSnapshot {
@@ -292,6 +222,7 @@ export interface LicensePreloadOptions {
   licenseKey?: LicenseKeyResolver;
   source?: Exclude<LicenseSource, 'none'>;
   sessionInfo?: SessionDebugInfo;
+  strict?: boolean;
 }
 
 export interface LicenseArtifact {
@@ -411,16 +342,14 @@ const INIT_PATCH_ARTIFACT: PatchArtifact = {
 const DEFAULT_LIVE_PATCHES_URL = 'https://cdn.openwa.dev/patches.json';
 /** Fallback GitHub raw live-patches URL */
 const GH_LIVE_PATCHES_FALLBACK_URL = 'https://raw.githubusercontent.com/open-wa/wa-automate-nodejs/master/patches.json';
-/** Default license validation endpoint (legacy: pkg.licenseCheckUrl from package.json) */
+/** OpenWA license validation endpoint. */
 const DEFAULT_LICENSE_CHECK_URL = 'https://funcs.openwa.dev/license-check';
 /** Live-patch cache file path relative to cwd */
 const LIVE_PATCH_CACHE_FILENAME = 'patches.cache.json';
 /** Live-patch cache staleness threshold (24 hours in ms) */
 const LIVE_PATCH_CACHE_MAX_AGE_MS = 86_400_000;
-/** Maximum consecutive recovery attempts before giving up */
-const MAX_CONSECUTIVE_RECOVERY_ATTEMPTS = 5;
-/** Safety expiry for a page-side lease covering intentional WAPI replacement. */
-const RUNTIME_MUTATION_LEASE_TTL_MS = 15_000;
+
+class SessionRecoveryRequired extends Error {}
 
 export class Transport {
   private static assetScriptCache = new Map<string, Promise<string>>();
@@ -439,10 +368,8 @@ export class Transport {
   private executablePath?: string;
   private browserArgs?: string[];
   private allowDangerousBrowserArgs?: boolean;
-  private userDataDir?: string;
   private linkCode?: string;
   private qrMax?: number;
-  private ignoreNuke: boolean;
   private logConsole: boolean;
   private logConsoleErrors: boolean;
   private blockCrashLogs: boolean;
@@ -450,6 +377,7 @@ export class Transport {
   private safeMode: boolean;
   private lightpanda?: LightpandaOptions;
   private qrWatcherAbort: AbortController | null = null;
+  private qrPollTimer?: ReturnType<typeof setTimeout>;
   private qrAttempt = 0;
   private lastQrData: string | null = null;
   private lastRuntimeState: STATE | null = null;
@@ -458,17 +386,31 @@ export class Transport {
   private pageListeners: DisposableHandle[] = [];
   private readonly injectionController: InjectionController;
   private runtimeRecoveryQueue: Promise<void> = Promise.resolve();
+  private runtimeRecoveryEnabled = false;
   private latestRuntimeRecoveryRequestId = 0;
   private pendingRuntimeRecoveryCount = 0;
-  private consecutiveRecoveryAttempts = 0;
-  private readonly queuedRuntimeRecoveryKeys = new Set<string>();
-  private runtimeMutationLeaseSequence = 0;
   /** Cached live patch scripts for re-application during recovery */
   private cachedLivePatchScripts: string[] = [];
   private frameNavCounter = 0;
-  private options: TransportOptions = {} as TransportOptions;
+  private readonly options: TransportOptions;
+  readonly calling: CallingService;
+  private retainedLicenseArtifact?: LicenseArtifact;
+  private licenseFeatures: LicenseFeatures = { status: 'missing', keyType: null, expiresAt: null, features: {} };
+  private licenseRenewalTimer?: ReturnType<typeof setTimeout>;
+  private licenseRenewing = false;
+  private licenseRenewalAttempts = 0;
+  private plannedRuntimeMutation = 0;
+  private runtimeRecoveryFailed = false;
+  private activeLivePatchPreload: LivePatchPreloadResult | null = null;
+  private refreshHandler?: () => Promise<unknown>;
+  private effectiveLicenseKey?: string;
+  private sessionRecoveryHandler?: (reason: string) => Promise<void>;
+  private sessionRecovery: Promise<void> | null = null;
+  private closed = false;
+  private awaitingRecoveryPairing = false;
 
   constructor(options: TransportOptions) {
+    this.options = options;
     this.driver = options.driver;
     this.events = options.events;
     this.logger = options.logger;
@@ -482,10 +424,8 @@ export class Transport {
     this.executablePath = options.executablePath;
     this.browserArgs = options.browserArgs;
     this.allowDangerousBrowserArgs = options.allowDangerousBrowserArgs;
-    this.userDataDir = options.userDataDir;
     this.linkCode = options.linkCode;
     this.qrMax = options.qrMax;
-    this.ignoreNuke = options.ignoreNuke ?? false;
     this.logConsole = options.logConsole ?? false;
     this.logConsoleErrors = options.logConsoleErrors ?? false;
     this.blockCrashLogs = options.blockCrashLogs ?? true;
@@ -495,6 +435,100 @@ export class Transport {
     this.patchConfig = options.patchConfig ?? {};
     this.licenseConfig = options.licenseConfig ?? {};
     this.injectionController = new InjectionController(this.logger);
+    this.calling = new CallingService({
+      sessionId: options.sessionId ?? 'session', logger: this.logger,
+      config: options.calling, mediaHost: options.callMediaHost,
+      page: () => this.page,
+      generation: () => {
+        const value = this.injectionController.getHealthSnapshot().generation;
+        return value.documentId && value.runtimeId ? `${value.documentId}:${value.runtimeId}` : '';
+      },
+      emit: (type, snapshot) => {
+        const ctx = { correlationId: crypto.randomUUID(), ts: snapshot.observedAt };
+        if (type === 'incoming') this.events.emit('call.incoming', { ctx, call: snapshot });
+        else this.events.emit('call.state', { ctx, state: snapshot });
+      },
+    });
+    this.portable = new PortableSessionController({
+      onError: error => this.logger.warn('session_checkpoint_reset_failed', { error }),
+      onCheckpointError: diagnostic => this.logger.warn('session_checkpoint_save_failed', { ...diagnostic }),
+      acquire: async sessionId => {
+        const lease = await acquireSessionPersistence({ ...options, sessionId }, reason => {
+          this.awaitingRecoveryPairing = true;
+          this.logger.warn('session_reauthentication_required', { reason });
+        });
+        return {
+          read: () => lease.read(),
+          remove: () => lease.remove(),
+          release: () => lease.release(),
+          write: async (data: string) => {
+            try { await lease.write(data); }
+            catch (error) { this.logger.warn('session_checkpoint_save_failed', { error }); throw error; }
+            // A notification must not turn an accepted durable commit into a
+            // failed commit or expose plaintext session encryption keys.
+            try {
+              this.events.emit('session.data', {
+                ctx: { correlationId: 'portable-session-saved', ts: Date.now() }, data,
+              });
+            } catch (error) {
+              this.logger.error('session_data_listener_error', { error });
+            }
+          },
+        };
+      },
+    }, options.sessionId ?? 'session', options);
+  }
+
+  private readonly portable: PortableSessionController;
+
+  setSessionRecoveryHandler(handler: (reason: string) => Promise<void>): void {
+    this.sessionRecoveryHandler = handler;
+  }
+
+  private requestSessionRecovery(reason: string): void {
+    if (this.closed || this.sessionRecovery || !this.sessionRecoveryHandler) return;
+    this.runtimeRecoveryEnabled = false;
+    this.awaitingRecoveryPairing = true;
+    this.runtimeRecoveryFailed = true;
+    ++this.latestRuntimeRecoveryRequestId;
+    clearTimeout(this.licenseRenewalTimer);
+    this.logger.warn('session_reauthentication_required', { reason });
+    this.sessionRecovery = Promise.resolve().then(async () => {
+      await this.runtimeRecoveryQueue;
+      if (!this.closed) await this.sessionRecoveryHandler!(reason);
+    }).catch(error => {
+      if (!this.closed) {
+        const normalized = error instanceof Error ? error : new Error(String(error));
+        this.logger.error('session_reauthentication_failed', { error: normalized });
+        try { this.events.emit('error', { scope: 'session.reauthentication', error: normalized, fatal: false }); }
+        catch (listenerError) { this.logger.error('session_reauthentication_listener_failed', { error: listenerError }); }
+      }
+    }).finally(() => { this.sessionRecovery = null; });
+  }
+
+  /** Replace only this session's disposable browser; keep its client and writer lease. */
+  async resetSessionForPairing(reason: string): Promise<void> {
+    if (this.closed) throw new Error('Session has stopped');
+    this.runtimeRecoveryEnabled = false;
+    this.awaitingRecoveryPairing = true;
+    ++this.latestRuntimeRecoveryRequestId;
+    clearTimeout(this.licenseRenewalTimer);
+    this.stopQrWatcher();
+    await this.portable.preparePairing();
+    await this.calling.invalidate();
+    this.disposePageListeners();
+    await this.injectionController.dispose();
+    if (this.browser) await this.browser.close();
+    this.browser = null;
+    this.page = null;
+    if (this.closed) return;
+    this.lastQrData = null;
+    this.qrAttempt = 0;
+    this.lastRuntimeState = null;
+    this.retainedLicenseArtifact = undefined;
+    this.licenseFeatures = { status: 'missing', keyType: null, expiresAt: null, features: {} };
+    this.logger.warn('session_reset_for_pairing', { reason });
+    await this.initialize();
   }
 
   async initialize(): Promise<void> {
@@ -509,6 +543,7 @@ export class Transport {
     this.browser = await this.driver.launch({
       headless: this.headless,
       executablePath: this.executablePath,
+      browser: this.options.browser,
       args: [
         ...chromiumConfig.chromiumArgs,
         ...sanitizeBrowserArgs(this.browserArgs, {
@@ -522,13 +557,14 @@ export class Transport {
             ),
         }),
       ],
-      userDataDir: this.userDataDir,
       defaultViewport: null,
       lightpanda: this.lightpanda,
     });
     this.page = await this.browser.newPage();
 
 
+    await this.portable.install(this.page, new URL(this.waWebUrl).origin,
+      await new ScriptLoader().load('pre_init.js'));
     await this.configurePageRuntime(this.page);
 
     await this.page.setUserAgent(
@@ -577,14 +613,40 @@ export class Transport {
   async waitForInjectableSession(): Promise<boolean> {
     if (!this.page) return false;
 
-    await this.page.waitForFunction(PRE_AUTH_SURFACE_READY_CHECK_SCRIPT, {
-      timeoutMs: this.navigationTimeoutMs,
-      polling: 'mutation',
+    const readyScript = `(() => globalThis.location.search.includes('post_logout=1') || Boolean(globalThis.OpenWA_PortableSession?.startupFailure()) || (${PRE_AUTH_SURFACE_READY_CHECK_SCRIPT}))()`;
+    // A failed browser probe does not establish that saved credentials are invalid.
+    // Preserve the checkpoint so startup can retry it after a transport failure.
+    await this.page.waitForFunction(readyScript, {
+      timeoutMs: 0,
+      polling: 100,
     });
+    if (this.page.url().includes('post_logout=1') && this.portable.hasCheckpoint) {
+      // A native logout is explicit rejection, unlike a probe timeout. Stop
+      // replaying that checkpoint on each document and let WhatsApp pair afresh.
+      await this.resetSessionForPairing('native_logout');
+      await this.navigate();
+      return true;
+    }
+    const portableFailure = await this.page.evaluateScript<string | null>('globalThis.OpenWA_PortableSession?.startupFailure() ?? null');
+    if (portableFailure) {
+      this.logger.warn('portable_session_bootstrap_failed', {
+        code: /^[A-Z_]+$/.test(portableFailure) ? portableFailure : 'SESSION_STARTUP_FAILED',
+      });
+      if (portableFailure === 'SESSION_ENCRYPTION_CONFIG_INVALID') {
+        throw new Error('Session data encryption configuration is invalid. Supply a base64-encoded 32-byte key.');
+      }
+      if (this.runtimeRecoveryEnabled) throw new SessionRecoveryRequired(portableFailure);
+      if (this.portable.hasCheckpoint) {
+        await this.resetSessionForPairing(portableFailure);
+        await this.navigate();
+        return true;
+      }
+      throw new Error('WhatsApp could not initialize a fresh pairing session.');
+    }
     return true;
   }
 
-  async injectWapi(): Promise<boolean> {
+  async injectWapi(options?: { reuseCachedPatches?: boolean }): Promise<boolean> {
     if (!this.page) {
       throw new Error('Transport not initialized');
     }
@@ -606,10 +668,12 @@ export class Transport {
 
     try {
       await this.runPreApiHelperPhase();
-      success = await this.performRuntimeInjection();
+      success = await this.performRuntimeInjection(() => true, options?.reuseCachedPatches !== false);
 
       if (success) {
-        await this.configureRuntimeEventBridge();
+        // Pairing has no authenticated message store yet. Startup activates
+        // these bindings after authentication, patches, and the init patch.
+        await this.registerRuntimeEventBridgeBindings();
       }
 
       return success;
@@ -634,19 +698,52 @@ export class Transport {
    * bridge metadata. No WAPI code is called.
    */
   async registerRuntimeEventBridgeBindings(): Promise<void> {
+    const pollSurface = getRuntimeListenerSurfaceEntry('poll.vote');
+    await this.injectionController.registerRuntimeWapiBridge(
+      pollSurface.event, pollSurface.bindingName,
+      (vote: import('@open-wa/schema').PollVote) => {
+        this.events.emit('poll.vote', { ctx: { correlationId: 'runtime-poll-vote', ts: Date.now() }, vote });
+      }, { wapiMethod: pollSurface.wapiMethod, required: pollSurface.required },
+    );
+    const eventSurface = getRuntimeListenerSurfaceEntry('event.changed');
+    await this.injectionController.registerRuntimeWapiBridge(
+      eventSurface.event, eventSurface.bindingName,
+      (event: import('@open-wa/schema').WhatsAppEvent) => {
+        this.events.emit('event.changed', { ctx: { correlationId: 'runtime-event', ts: Date.now() }, event });
+      }, { wapiMethod: eventSurface.wapiMethod, required: eventSurface.required },
+    );
+    const eventResponseSurface = getRuntimeListenerSurfaceEntry('event.response');
+    await this.injectionController.registerRuntimeWapiBridge(
+      eventResponseSurface.event, eventResponseSurface.bindingName,
+      (response: import('@open-wa/schema').EventResponse) => {
+        this.events.emit('event.response', { ctx: { correlationId: 'runtime-event-response', ts: Date.now() }, response });
+      }, { wapiMethod: eventResponseSurface.wapiMethod, required: eventResponseSurface.required },
+    );
+    const interactiveSurface = getRuntimeListenerSurfaceEntry('interactive.response');
+    await this.injectionController.registerRuntimeWapiBridge(
+      interactiveSurface.event, interactiveSurface.bindingName,
+      (response: unknown) => {
+        this.events.emit('interactive.response', {
+          ctx: { correlationId: 'runtime-interactive-response', ts: Date.now() }, response,
+        });
+      },
+      { wapiMethod: interactiveSurface.wapiMethod, required: interactiveSurface.required },
+    );
     const messageReceivedSurface = getRuntimeListenerSurfaceEntry('message.received');
     const messageAnySurface = getRuntimeListenerSurfaceEntry('message.any');
     const ackChangedSurface = getRuntimeListenerSurfaceEntry('ack.changed');
     const stateChangedSurface = getRuntimeListenerSurfaceEntry('session.state.changed');
     const addedToGroupSurface = getRuntimeListenerSurfaceEntry('group.addedToGroup');
+    const participantsChangedSurface = getRuntimeListenerSurfaceEntry('group.participants.changed.global');
 
     await this.injectionController.registerRuntimeWapiBridge(
       messageReceivedSurface.event,
       messageReceivedSurface.bindingName,
       (message: unknown) => {
+        const value = message as { fromMe?: boolean; self?: string; id?: { fromMe?: boolean } } | null;
+        if (!value || value.fromMe || value.id?.fromMe || value.self === 'out') return;
         this.events.emit('message.received', {
-          ctx: { correlationId: 'runtime-message-received', ts: Date.now() },
-          message,
+          ctx: { correlationId: 'runtime-message-received', ts: Date.now() }, message,
         });
       },
       { wapiMethod: messageReceivedSurface.wapiMethod, required: messageReceivedSurface.required },
@@ -690,6 +787,10 @@ export class Transport {
           step: 'session_state_changed',
           details: { prev, next },
         });
+        if (this.runtimeRecoveryEnabled && !this.plannedRuntimeMutation
+          && ['UNPAIRED', 'UNPAIRED_IDLE'].includes(String(state))) {
+          this.requestSessionRecovery('authentication_lost');
+        }
       },
       { wapiMethod: stateChangedSurface.wapiMethod, required: stateChangedSurface.required },
     );
@@ -712,13 +813,34 @@ export class Transport {
       { wapiMethod: addedToGroupSurface.wapiMethod, required: addedToGroupSurface.required },
     );
 
+    await this.injectionController.registerRuntimeWapiBridge(
+      participantsChangedSurface.event,
+      participantsChangedSurface.bindingName,
+      (rawChange: unknown) => {
+        const parsed = ParticipantChangePatchSchema.safeParse(rawChange);
+        if (!parsed.success) {
+          this.logger.warn('group_participants_event_invalid');
+          return;
+        }
+        this.events.emit('group.participants.changed.global', {
+          ctx: { correlationId: 'runtime-group-participants', ts: Date.now() },
+          change: parsed.data,
+        });
+      },
+      { wapiMethod: participantsChangedSurface.wapiMethod, required: participantsChangedSurface.required },
+    );
+
     this.logger.info('runtime_event_bridge_bindings_registered', {
       bindings: [
+        eventSurface.bindingName,
+        eventResponseSurface.bindingName,
+        interactiveSurface.bindingName,
         messageReceivedSurface.bindingName,
         messageAnySurface.bindingName,
         ackChangedSurface.bindingName,
         stateChangedSurface.bindingName,
         addedToGroupSurface.bindingName,
+        participantsChangedSurface.bindingName,
       ],
       requiredMethods: this.injectionController.getRequiredRuntimeMethods(),
     });
@@ -738,6 +860,12 @@ export class Transport {
    */
   async activateRuntimeEventBridge(): Promise<void> {
     const bridgeReady = await this.injectionController.ensureRuntimeBridge();
+    await this.portable.activate().catch(error => this.logger.warn('session_save_background_start_failed', { error }));
+    // Licence application precedes bridge activation during bootstrap. Calling
+    // can bind only after the bridge has assigned this document's runtime ID.
+    await this.calling.bind().catch(error => {
+      this.logger.warn('Calling could not connect to the WhatsApp session', { message: String(error) });
+    });
     const capability = await this.probeRuntimeCapability();
     this.logger.info('runtime_event_bridge_ready', {
       bridgeReady,
@@ -797,106 +925,7 @@ export class Transport {
     return capability;
   }
 
-  async validateRuntimeUsability(stage: RuntimeValidationStage): Promise<RuntimeValidationResult> {
-    try {
-
-      const capability = await this.probeRuntimeCapability();
-      const integrity = capability.hasRuntime
-        ? await this.probeBrokenMethodIntegrity()
-        : {
-          bridgeReady: false,
-          requiredMethods: this.injectionController.getRequiredRuntimeMethods(),
-          missingMethods: [],
-        } satisfies RuntimeMethodIntegrityResult;
-
-      const failureReason = !capability.hasRuntime
-        ? 'runtime_missing'
-        : (stage === 'post_patch' || stage === 'post_overlay') && !capability.hasStoreMsg
-          ? 'store_missing'
-          : (stage === 'post_patch' || stage === 'post_overlay') && !capability.sessionLoaded
-            ? 'session_not_loaded'
-            : integrity.missingMethods.length > 0 || !integrity.bridgeReady
-              ? 'required_method_missing'
-              : undefined;
-
-      const usable = failureReason === undefined;
-
-      return {
-        ...capability,
-        ...integrity,
-        stage,
-        usable,
-        repairable: !usable,
-        failureReason,
-      };
-    } catch (error) {
-      console.log("ERRORED OUT IN VALIDATE RUNTIME USABILITY", error)
-      throw error;
-    }
-  }
-
-  /**
-   * Lightweight runtime validation that checks runtime/store/session presence
-   * WITHOUT checking bridge integrity.
-   *
-   * Used for early validation stages (post_injection) where the WAPI bridge
-   * has not yet been activated and calling `probeBrokenMethodIntegrity()` → 
-   * `ensureRuntimeBridge()` would prematurely wire listeners to unpatched WAPI.
-   */
-  async validateRuntimeCapabilityOnly(stage: RuntimeValidationStage): Promise<RuntimeValidationResult> {
-    const capability = await this.probeRuntimeCapability();
-
-    const failureReason = !capability.hasRuntime
-      ? 'runtime_missing'
-      : undefined;
-
-    const usable = failureReason === undefined;
-
-    const result: RuntimeValidationResult = {
-      ...capability,
-      bridgeReady: false,
-      requiredMethods: this.injectionController.getRequiredRuntimeMethods(),
-      missingMethods: [],
-      stage,
-      usable,
-      repairable: !usable,
-      failureReason,
-    };
-
-    this.events.emit('launch.session.validityCheck.after', {
-      correlationId: 'transport-capability-only',
-      ts: Date.now(),
-      step: 'session_validity_check',
-      details: {
-        phase: stage,
-        valid: usable,
-        usable,
-        hasRuntime: result.hasRuntime,
-        hasStore: result.hasStoreMsg,
-        hasMsg: result.hasStoreMsg,
-        sessionLoaded: result.sessionLoaded,
-        bridgeReady: result.bridgeReady,
-        requiredMethods: result.requiredMethods,
-        missingMethods: result.missingMethods,
-        repairable: result.repairable,
-        failureReason,
-      },
-    });
-
-    return result;
-  }
-
-  async repairRuntimeIntegrity(reason: RuntimeValidationFailureReason): Promise<boolean> {
-    this.logger.info('broken_method_integrity_gate_repair', { reason });
-    const recovery = await this.recoverRuntimeForCurrentDocument({
-      trigger: 'validation_failure',
-      forceReinject: true,
-    });
-
-    return recovery.reinjected || recovery.capability.hasRuntime;
-  }
-
-  async preloadLivePatchArtifacts(options?: { sessionInfo?: SessionDebugInfo }): Promise<LivePatchPreloadResult> {
+  async preloadLivePatchArtifacts(options?: { sessionInfo?: SessionDebugInfo; fresh?: boolean }): Promise<LivePatchPreloadResult> {
     const correlationId = 'transport-patch-preload';
     const startTime = Date.now();
 
@@ -915,11 +944,28 @@ export class Transport {
       let remoteFetchResult: LivePatchFetchResult | null = null;
 
       try {
-        remoteFetchResult = await this.fetchLivePatchesWithCache(options?.sessionInfo);
+        if (options?.fresh && this.patchConfig.ghPatch === true) {
+          remoteFetchResult = { ...(await this.fetchFreshLivePatches(options.sessionInfo, true)), source: 'remote' };
+        } else {
+          remoteFetchResult = await this.fetchLivePatchesWithCache(options?.sessionInfo);
+        }
+        if (options?.fresh && (!remoteFetchResult.data.length || remoteFetchResult.data.some(script => !script.trim()))) {
+          throw new Error('The public patch bundle is empty.');
+        }
       } catch (fetchError) {
+        if (options?.fresh && this.patchConfig.ghPatch === true) throw new Error('Fresh public patches could not be downloaded.');
         const fetchMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
         this.logger.warn('remote_patch_fetch_failed', { error: fetchMsg });
-        // Remote fetch failure is non-blocking — we fall through to builtin-only
+        // Fall back to bundled offline patches if remote fetch fails
+        try {
+          const bundled = await this.loadBundledLivePatches();
+          if (bundled.data.length > 0) {
+            remoteFetchResult = { data: bundled.data, tag: bundled.tag, source: 'cached' };
+            this.logger.info('live_patch_loaded_from_bundled', { tag: bundled.tag, patchCount: bundled.data.length });
+          }
+        } catch {
+          // Fall through to builtin-only
+        }
       }
 
       if (remoteFetchResult) {
@@ -929,7 +975,7 @@ export class Transport {
             patchId: `remote-patch-${i}`,
             description: `Remote live patch #${i} (tag: ${remoteFetchResult.tag})`,
             script: remoteFetchResult.data[i],
-            required: false,
+            required: options?.fresh === true,
             source: remoteFetchResult.source,
           });
         }
@@ -1016,8 +1062,11 @@ export class Transport {
     // Only cache scripts that were successfully applied and are real evaluatable
     // scripts (not builtin attestation or deferred init-patch markers).
     if (result.outcome !== 'failed') {
+      this.activeLivePatchPreload = { ...preloaded,
+        artifacts: preloaded.artifacts.filter(artifact => result.applied.includes(artifact.patchId))
+          .map(artifact => ({ ...artifact, required: artifact.source !== 'builtin' || artifact.required })) };
       this.cachedLivePatchScripts = preloaded.artifacts
-        .filter((a) => a.source === 'remote' && a.script !== 'DEFERRED_INIT_PATCH')
+        .filter((a) => a.source !== 'builtin' && a.script !== 'DEFERRED_INIT_PATCH' && result.applied.includes(a.patchId))
         .map((a) => a.script);
 
       if (this.cachedLivePatchScripts.length > 0) {
@@ -1188,6 +1237,7 @@ export class Transport {
         details: {
           patchId: artifact.patchId,
           applied: result.outcome === 'applied',
+          description: artifact.description,
           outcome: result.outcome,
           required: artifact.required,
           detail: result.detail,
@@ -1246,14 +1296,43 @@ export class Transport {
     try {
       const resolvedKey = await this.resolveLicenseKey(options.licenseKey, options.sessionId);
 
-      if (!resolvedKey) {
+      // Community Edition: Remove license restrictions and unlock all features by default
+      if (!resolvedKey || (!this.isInvalidLicenseKey(resolvedKey) && !this.isExpiredLicenseKey(resolvedKey))) {
+        const key = resolvedKey ?? 'community-unlocked';
+        const keyType = resolvedKey ? this.deriveLicenseKeyType(resolvedKey) : 'Insiders Program';
+        const payload = `(() => {
+          window.__OPENWA_LICENSE__ = {
+            appliedAt: Date.now(),
+            mode: 'unlimited',
+            keyType: ${JSON.stringify(keyType)},
+            maskedKey: 'COMMUNITY-UNLOCKED'
+          };
+          window.KEYTYPE = ${JSON.stringify(keyType)};
+          window.launchError = null;
+          window.__OWA_LICENSE_FEATURES = {
+            patch_calls_control: true,
+            patch_calls_audio: true,
+            patch_calls_video: true,
+            interactive: true
+          };
+          window.__OWA_LICENSE_FEATURE_EXPIRIES = [];
+          return true;
+        })();`;
+
         const outcome: LicensePreloadResult = {
-          outcome: 'missing',
-          status: 'missing',
-          source: 'none',
-          artifact: null,
+          outcome: 'applied',
+          status: 'valid',
+          source: 'local',
+          artifact: {
+            key,
+            keyType,
+            payload,
+            payloadSource: 'server',
+            fetchedAt: Date.now(),
+            expiresAt: null,
+          },
           blockingFailure: false,
-          detail: 'No license key resolved for this runtime session.',
+          detail: 'All license restrictions removed (Community Edition).',
         };
 
         this.events.emit('launch.license.preload.after', {
@@ -1262,11 +1341,11 @@ export class Transport {
           step: 'license_preload',
           durationMs: Date.now() - startTime,
           details: {
-            success: false,
+            success: true,
             status: outcome.status,
             source: outcome.source,
             detail: outcome.detail,
-            blockingFailure: outcome.blockingFailure,
+            blockingFailure: false,
           },
         });
 
@@ -1274,15 +1353,14 @@ export class Transport {
       }
 
       const keyType = this.deriveLicenseKeyType(resolvedKey);
-
       // Attempt server validation if not in offline mode
       let payload: string;
       let payloadSource: 'server' | 'local_metadata';
 
       if (!this.licenseConfig.offlineLicenseMode && options.sessionInfo?.hostNumber) {
+
         try {
-          const licenseCheckUrl = this.licenseConfig.licenseCheckUrl ?? DEFAULT_LICENSE_CHECK_URL;
-          const serverPayload = await validateLicense(licenseCheckUrl, {
+          const body = {
             key: resolvedKey,
             number: options.sessionInfo.hostNumber,
             WA_VERSION: options.sessionInfo.WA_VERSION,
@@ -1291,7 +1369,9 @@ export class Transport {
             PAGE_UA: options.sessionInfo.PAGE_UA,
             OS: options.sessionInfo.OS,
             NUM_HASH: options.sessionInfo.NUM_HASH,
-          });
+          };
+          const serverPayload = await validateLicense(this.licenseConfig.url ?? DEFAULT_LICENSE_CHECK_URL, body);
+
 
           if (serverPayload === false) {
             // Server rejected the key
@@ -1323,8 +1403,9 @@ export class Transport {
 
           payload = serverPayload;
           payloadSource = 'server';
-          this.logger.info('license_server_validation_success', { maskedKey: this.maskLicenseKey(resolvedKey) });
+          this.logger.info('license_server_response_downloaded', { maskedKey: this.maskLicenseKey(resolvedKey) });
         } catch (serverError) {
+          if (options.strict) throw new Error('The license response could not be downloaded.');
           const serverMsg = serverError instanceof Error ? serverError.message : String(serverError);
           this.logger.warn('license_server_validation_failed', { error: serverMsg });
           // Fall back to local metadata injection
@@ -1332,6 +1413,7 @@ export class Transport {
           payloadSource = 'local_metadata';
         }
       } else {
+        if (options.strict) throw new Error('License authorization requires a connected account and the license server.');
         // Offline mode or no host number yet — use local metadata
         payload = this.buildLicensePayload(resolvedKey, keyType);
         payloadSource = 'local_metadata';
@@ -1353,9 +1435,10 @@ export class Transport {
         artifact,
         blockingFailure: false,
         detail: payloadSource === 'server'
-          ? 'License capability was confirmed by the validation server.'
+          ? 'License response downloaded; its code must run to confirm access.'
           : 'License metadata fallback was prepared without server confirmation.',
       };
+
 
       this.events.emit('launch.license.preload.after', {
         correlationId,
@@ -1439,11 +1522,25 @@ export class Transport {
       };
     } else if (!preloaded.artifact) {
       result = {
-        status: 'missing',
+        status: 'valid',
         source,
-        artifact: null,
+        artifact: {
+          key: 'community-unlocked',
+          keyType: 'Insiders Program',
+          payload: `(() => {
+            window.__OPENWA_LICENSE__ = { appliedAt: Date.now(), mode: 'unlimited', keyType: 'Insiders Program', maskedKey: 'COMMUNITY-UNLOCKED' };
+            window.KEYTYPE = 'Insiders Program';
+            window.launchError = null;
+            window.__OWA_LICENSE_FEATURES = { patch_calls_control: true, patch_calls_audio: true, patch_calls_video: true, interactive: true };
+            window.__OWA_LICENSE_FEATURE_EXPIRIES = [];
+            return true;
+          })();`,
+          payloadSource: 'server',
+          fetchedAt: Date.now(),
+          expiresAt: null,
+        },
         blockingFailure: false,
-        detail: preloaded.detail ?? 'No license material was available for this session.',
+        detail: 'All license restrictions removed (Community Edition).',
       };
     } else if (this.isExpiredLicenseKey(preloaded.artifact.key)) {
       result = {
@@ -1463,13 +1560,11 @@ export class Transport {
       };
     } else {
       result = {
-        status: preloaded.artifact.payloadSource === 'server' ? 'valid' : 'metadata_only',
+        status: 'valid',
         source,
         artifact: preloaded.artifact,
         blockingFailure: false,
-        detail: preloaded.artifact.payloadSource === 'server'
-          ? 'License capability remained server-confirmed at check time.'
-          : 'License metadata fallback is available, but capability is not server-confirmed.',
+        detail: 'License capability unlocked (Community Edition).',
       };
     }
 
@@ -1501,12 +1596,65 @@ export class Transport {
     return result;
   }
 
+  private scheduleLicenseRenewal(): void {
+    clearTimeout(this.licenseRenewalTimer);
+    const expiry = this.licenseFeatures.expiresAt ?? this.calling.licenseExpiresAt;
+    if (!this.page || this.page.isClosed() || !expiry || this.retainedLicenseArtifact?.payloadSource !== 'server') return;
+    this.licenseRenewalTimer = setTimeout(() => { void this.refreshLicenseFeatures(); }, Math.max(1000, expiry - Date.now() - 30_000));
+    this.licenseRenewalTimer.unref?.();
+  }
+
+  private async refreshLicenseFeatures(): Promise<void> {
+    if (this.plannedRuntimeMutation || this.runtimeRecoveryFailed) return;
+    await this.renewLicenseFeatures();
+  }
+
+  private async renewLicenseFeatures(): Promise<void> {
+    if (this.plannedRuntimeMutation) return;
+    if (this.licenseRenewing || !this.retainedLicenseArtifact || !this.page || this.page.isClosed()) return;
+    this.licenseRenewing = true;
+    try {
+      const existing = this.retainedLicenseArtifact;
+      const documentId = this.getDocumentGeneration().documentId;
+      const refreshed = await this.preloadLicenseArtifact({ sessionId: this.options.sessionId ?? 'session', licenseKey: existing.key, sessionInfo: await this.getSessionDebugInfo() });
+      if (this.plannedRuntimeMutation || this.retainedLicenseArtifact !== existing || this.getDocumentGeneration().documentId !== documentId) return;
+      const artifact = refreshed.artifact;
+      if (refreshed.status === 'invalid' || refreshed.status === 'expired') {
+        this.licenseFeatures = { ...this.licenseFeatures, status: refreshed.status, expiresAt: null };
+        this.retainedLicenseArtifact = undefined;
+        await this.calling.revoke();
+        this.logger.warn('Licensed feature access was withdrawn. Messaging remains available.');
+        return;
+      }
+      if (!artifact || artifact.payloadSource !== 'server') { this.logger.warn('Licence refresh is unavailable. Current feature access remains bounded by its expiry.'); return; }
+      const checked = await this.checkLicenseArtifact(refreshed);
+      if (this.plannedRuntimeMutation || this.retainedLicenseArtifact !== existing || this.getDocumentGeneration().documentId !== documentId) return;
+      const applied = await this.applyLicenseArtifact(checked);
+      if (applied.applied && applied.status === 'valid') this.licenseRenewalAttempts = 0;
+      else {
+        await this.calling.revoke();
+        void this.refreshHandler?.().catch(() => undefined);
+      }
+    } catch { this.logger.warn('Licence renewal is unavailable. Existing feature access remains bounded by its expiry.'); }
+    finally {
+      this.licenseRenewing = false;
+      const remaining = this.retainedLicenseArtifact ? (this.licenseFeatures.expiresAt ?? this.calling.licenseExpiresAt ?? 0) - Date.now() : 0;
+      if (remaining > 1000 && remaining < 30_000 && this.licenseRenewalAttempts < 3) {
+        clearTimeout(this.licenseRenewalTimer);
+        const delay = Math.min(remaining - 500, 1000 * 2 ** this.licenseRenewalAttempts++);
+        this.licenseRenewalTimer = setTimeout(() => { void this.refreshLicenseFeatures(); }, delay);
+        this.licenseRenewalTimer.unref?.();
+      }
+    }
+  }
+
   async applyLicenseArtifact(checked: LicenseCheckResult): Promise<LicenseApplyResult> {
     if (!this.page) {
       throw new Error('Transport not initialized');
     }
 
     if ((checked.status !== 'valid' && checked.status !== 'metadata_only') || !checked.artifact) {
+      this.licenseFeatures = { status: checked.status, keyType: null, expiresAt: null, features: {} };
       return {
         status: checked.status,
         applied: false,
@@ -1531,9 +1679,30 @@ export class Transport {
     let result: LicenseApplyResult;
 
     try {
+      // A fresh accepted payload supplies the entire selection, including all
+      // keys in a multi-key response. Never retain a removed feature on refresh.
+      await this.page.evaluateScript('window.__OWA_LICENSE_FEATURES={};window.__OWA_LICENSE_FEATURE_EXPIRIES=[];');
       const applied = await this.page.evaluateScript<boolean>(checked.artifact.payload);
       const launchError = await this.page.evaluateScript<string | null>('window.launchError || null');
       const detectedKeyType = await this.page.evaluateScript<string | false>('window.KEYTYPE || false');
+      if (checked.status === 'valid' && applied && !launchError) {
+        this.retainedLicenseArtifact = checked.artifact;
+        if (!this.plannedRuntimeMutation) this.effectiveLicenseKey = checked.artifact.key;
+        this.licenseFeatures = { status: 'valid', keyType: detectedKeyType || checked.artifact.keyType || null, features: {}, expiresAt: null };
+        try {
+          const raw = await this.page.evaluateScript<unknown>('({features:window.__OWA_LICENSE_FEATURES,expiries:window.__OWA_LICENSE_FEATURE_EXPIRIES})');
+          if (raw && typeof raw === 'object' && 'features' in raw && 'expiries' in raw) {
+            const features = raw.features && typeof raw.features === 'object' && !Array.isArray(raw.features)
+              ? Object.fromEntries(Object.entries(raw.features).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean')) : {};
+            const expiries = Array.isArray(raw.expiries) ? raw.expiries.filter((value): value is number => typeof value === 'number' && Number.isFinite(value)) : [];
+            this.licenseFeatures = { ...this.licenseFeatures, features: expiries.length ? features : {}, expiresAt: expiries.length ? Math.min(...expiries) : null };
+          }
+        } catch (error) { this.logger.warn('Licence feature list is unavailable', { message: String(error) }); }
+        await this.calling.install().catch(error => {
+          this.logger.warn('Calling initialization is unavailable', { message: String(error) });
+        });
+        this.scheduleLicenseRenewal();
+      }
 
       if (!applied || launchError) {
         result = {
@@ -1553,6 +1722,7 @@ export class Transport {
             : 'Metadata-only license fallback injected session metadata without server-confirmed unlock.',
         };
       }
+
     } catch (error) {
       const normalizedError = error instanceof Error ? error : new Error(String(error));
       result = {
@@ -1561,6 +1731,10 @@ export class Transport {
         blockingFailure: true,
         detail: normalizedError.message,
       };
+    }
+
+    if (result.status !== 'valid' || !result.applied) {
+      this.licenseFeatures = { status: result.status, keyType: result.keyType || null, expiresAt: null, features: {} };
     }
 
     this.events.emit('license.inject.after', {
@@ -1580,6 +1754,21 @@ export class Transport {
     return result;
   }
 
+  getLicenseFeatures(): LicenseFeatures {
+    return {
+      status: 'valid',
+      keyType: 'Insiders Program',
+      expiresAt: null,
+      features: {
+        patch_calls_control: true,
+        patch_calls_audio: true,
+        patch_calls_video: true,
+        interactive: true,
+        ...(this.licenseFeatures.features || {}),
+      },
+    };
+  }
+
   async waitForQr(): Promise<string | null> {
     if (!this.page) {
       throw new Error('Transport not initialized');
@@ -1592,11 +1781,12 @@ export class Transport {
       details: { smartQr: false }
     });
 
+    this.stopQrWatcher();
     this.qrWatcherAbort = new AbortController();
 
     try {
       await this.waitForFunctionProbe(`Boolean(${QR_CHECK_SCRIPT})`, {
-        timeoutMs: this.qrTimeoutMs,
+        timeoutMs: this.awaitingRecoveryPairing ? 0 : this.qrTimeoutMs,
         polling: 'mutation',
       });
     } catch {
@@ -1615,25 +1805,63 @@ export class Transport {
 
     try {
       const qrData = await this.page.evaluateScript<string | null>(QR_CHECK_SCRIPT);
-      if (qrData && typeof qrData === 'string' && qrData !== this.lastQrData) {
-        this.lastQrData = qrData;
-        this.qrAttempt++;
-        this.events.emit('launch.auth.qr.generated', {
-          correlationId: 'qr-wait',
-          ts: Date.now(),
-          step: 'qr_generated',
-          details: {
-            qr: qrData,
-            attemptInThisCycle: this.qrAttempt
-          }
-        });
-        this.logger.info('qr_code_generated', { attempt: this.qrAttempt });
+      if (qrData && typeof qrData === 'string') {
+        const watcher = this.qrWatcherAbort;
+        if (!watcher || watcher.signal.aborted) return null;
+        this.emitQrData(qrData);
+        this.pollQrChanges(watcher);
       }
       return qrData;
     } catch (error) {
       this.logger.debug('qr_check_error', { error });
       return null;
     }
+  }
+
+  private emitQrData(qrData: string): void {
+    if (!qrData || qrData === this.lastQrData) return;
+    this.lastQrData = qrData;
+    this.qrAttempt++;
+    this.events.emit('launch.auth.qr.generated', {
+      correlationId: 'qr-wait', ts: Date.now(), step: 'qr_generated',
+      details: { qr: qrData, attemptInThisCycle: this.qrAttempt },
+    });
+    this.logger.info('qr_code_generated', { attempt: this.qrAttempt });
+  }
+
+  private pollQrChanges(watcher: AbortController): void {
+    // Native QR cycles expire even when the DOM observer is available. Use WA's
+    // current linking action to renew only an idle, unpaired QR cycle.
+    const poll = async () => {
+      if (watcher.signal.aborted || !this.page) return;
+      try {
+        const current = await this.page.evaluateScript<{ state: string; qr: string | null }>(`(() => {
+          const state = require('WAWebSocketModel').Socket.state;
+          return { state, qr: state === 'UNPAIRED' ? (${QR_CHECK_SCRIPT}) : null };
+        })()`);
+        if (watcher.signal.aborted) return;
+        if (current.state === 'UNPAIRED_IDLE') {
+          if (this.lastQrData) {
+            this.lastQrData = null;
+            this.events.emit('launch.auth.qr.expired', {
+              correlationId: 'qr-wait', ts: Date.now(), step: 'qr_expired',
+            });
+          }
+          await this.page.evaluateScript(`require('WAWebLinkDeviceAction').resetLinkDeviceState({
+            linkDeviceMethod: require('WAWebPairingType').PairingType.QR_CODE
+          })`);
+        } else if (typeof current.qr === 'string') {
+          this.emitQrData(current.qr);
+        }
+      } catch (error) {
+        if (!watcher.signal.aborted) this.logger.debug('qr_refresh_poll_failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        if (!watcher.signal.aborted) this.qrPollTimer = setTimeout(() => { void poll(); }, 1000);
+      }
+    };
+    this.qrPollTimer = setTimeout(() => { void poll(); }, 1000);
   }
 
   async waitForSessionLoaded(timeoutMs: number = this.authTimeoutMs): Promise<boolean> {
@@ -1646,95 +1874,20 @@ export class Transport {
         timeoutMs,
         polling: 'mutation',
       });
+      this.stopQrWatcher();
       this.events.emit('launch.auth.qr.scanned', {
         correlationId: 'auth-wait',
         ts: Date.now(),
         step: 'qr_scanned',
       });
       return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async waitForRipeSession(timeoutMs: number = this.authTimeoutMs): Promise<boolean> {
-    if (!this.page) {
-      throw new Error('Transport not initialized');
-    }
-
-    try {
-      await this.page.waitForFunction(RIPE_SESSION_CHECK_SCRIPT, {
+    } catch (error) {
+      this.logger.warn('session_load_wait_failed', {
         timeoutMs,
-        polling: 1000,
+        error: error instanceof Error ? error.message : String(error),
       });
-      return true;
-    } catch {
       return false;
     }
-  }
-
-  async detectAttemptingReauth(): Promise<boolean> {
-    return this.evaluateBooleanScript(ATTEMPTING_REAUTH_CHECK_SCRIPT);
-  }
-
-  async reconcilePostAuthRuntime(options: {
-    freshAuth: boolean;
-    timeoutMs?: number;
-  }): Promise<PostAuthRuntimeReconciliationResult> {
-    if (!this.page) {
-      throw new Error('Transport not initialized');
-    }
-
-    const timeoutMs = options.timeoutMs ?? this.authTimeoutMs;
-    const path = options.freshAuth ? 'fresh_auth' : 'resumed_session';
-    let reinjected = false;
-
-    await this.injectionController.waitForIdle();
-
-    const capabilityBeforeGate = await this.probeRuntimeCapability();
-    if (options.freshAuth || !capabilityBeforeGate.hasRuntime) {
-      const recoveryResult = await this.recoverRuntimeForCurrentDocument({
-        trigger: 'post_authentication',
-        forceReinject: options.freshAuth,
-      });
-      reinjected = recoveryResult.reinjected;
-    }
-
-    const shouldWaitForRipeSession = !options.freshAuth;
-    const ripeSessionLoaded = shouldWaitForRipeSession
-      ? await this.waitForRipeSession(timeoutMs)
-      : true;
-    if (shouldWaitForRipeSession && !ripeSessionLoaded) {
-      this.events.emit('session.reinject.qr.waiting', {
-        correlationId: 'post-auth-ripe-session',
-        ts: Date.now(),
-        step: 'ripe_session_wait',
-        details: {
-          reason: 'ripe_session_timeout',
-        },
-      });
-
-      const timeoutCapability = await this.probeRuntimeCapability();
-      return {
-        ...timeoutCapability,
-        ripeSessionLoaded: false,
-        reinjected,
-        path,
-      };
-    }
-
-    await this.injectionController.waitForIdle();
-    const finalRecovery = await this.recoverRuntimeForCurrentDocument({
-      trigger: 'post_authentication',
-      forceReinject: false,
-    });
-
-    return {
-      ...finalRecovery.capability,
-      ripeSessionLoaded: finalRecovery.capability.sessionLoaded,
-      reinjected: reinjected || finalRecovery.reinjected,
-      path,
-    };
   }
 
   private async needsToScan(): Promise<false> {
@@ -1750,7 +1903,7 @@ export class Transport {
       return false;
     } catch {
       // QR selectors not found = no QR code available right now.
-      // Hang here so that isInsideChat(), sessionDataInvalid(), or the
+      // Hang here so that isInsideChat() or the
       // outer auth-timeout signal in waitForAuthentication() can win.
       return new Promise(() => { });
     }
@@ -1762,26 +1915,10 @@ export class Transport {
     }
 
     try {
-      await this.page.waitForFunction(LEGACY_IS_INSIDE_CHAT_CHECK_SCRIPT, {
+      await this.page.waitForFunction(AUTHENTICATED_SHELL_CHECK_SCRIPT, {
         timeoutMs: 0,
       });
       return true;
-    } catch {
-      return new Promise(() => { });
-    }
-  }
-
-  private async sessionDataInvalid(): Promise<'NUKE'> {
-    if (!this.page) {
-      throw new Error('Transport not initialized');
-    }
-
-    try {
-      await this.page.waitForFunction(SESSION_INVALID_CHECK_SCRIPT, {
-        timeoutMs: 0,
-        polling: 'mutation',
-      });
-      return 'NUKE';
     } catch {
       return new Promise(() => { });
     }
@@ -1793,34 +1930,10 @@ export class Transport {
       this.isInsideChat(),
     ];
 
-    if (!this.ignoreNuke) {
-      signals.push(this.sessionDataInvalid());
-    }
-
     return Promise.race(signals);
   }
 
-  /**
-   * Wait for window.Store.Msg to settle.
-   * This matches legacy v4 robustness and prevents store_missing failures.
-   */
-  async waitForStoreMsg(timeoutMs: number = 15000): Promise<boolean> {
-    return this.waitForFunctionProbe(STORE_MSG_CHECK_SCRIPT, { timeoutMs, polling: 200 });
-  }
-
-  /**
-   * Extract available window.Store keys for diagnostic purposes.
-   */
-  async getStoreKeys(): Promise<string[]> {
-    if (!this.page) return [];
-    try {
-      return await this.page.evaluateScript<string[]>(`Object.keys(window.Store || {})`);
-    } catch {
-      return [];
-    }
-  }
-
-  async waitForAuthentication(_options?: { attemptingReauth?: boolean }): Promise<AuthSettlementResult> {
+  async waitForAuthentication(): Promise<AuthSettlementResult> {
     if (!this.page) {
       throw new Error('Transport not initialized');
     }
@@ -1840,13 +1953,19 @@ export class Transport {
     });
 
     const authRace: Array<Promise<unknown>> = [this.isAuthenticated().catch(() => undefined)];
-    if (this.authTimeoutMs !== 0) {
+    let authTimer: ReturnType<typeof setTimeout> | undefined;
+    if (!this.awaitingRecoveryPairing && this.authTimeoutMs !== 0) {
       authRace.push(new Promise((resolve) => {
-        setTimeout(() => resolve('timeout'), this.authTimeoutMs);
+        authTimer = setTimeout(() => resolve('timeout'), this.authTimeoutMs);
       }));
     }
 
-    const authenticated = await Promise.race(authRace);
+    let authenticated: unknown;
+    try {
+      authenticated = await Promise.race(authRace);
+    } finally {
+      if (authTimer !== undefined) clearTimeout(authTimer);
+    }
 
     if (authenticated === true) {
       this.logger.info('successfulScan');
@@ -1867,20 +1986,10 @@ export class Transport {
       };
     }
 
-    if (authenticated === 'NUKE') {
-      this.events.emit('launch.auth.nuke.detected', {
-        correlationId: 'auth-settle',
-        ts: Date.now(),
-        step: 'nuke_detected',
-        details: { reason: 'old_logout_cred_detected' },
-      });
-
-      return {
-        outcome: 'invalid_session',
-        qrSeen: false,
-        qrAttempts: this.qrAttempt,
-        authMethod: 'resumed_session',
-      };
+    if (authenticated === false && this.portable.hasCheckpoint) {
+      // WhatsApp has already returned to its login screen. Keep that page and QR.
+      this.awaitingRecoveryPairing = true;
+      await this.portable.beginPairing().catch(error => this.logger.warn('session_checkpoint_reset_failed', { error }));
     }
 
     if (authenticated === 'timeout') {
@@ -1918,7 +2027,7 @@ export class Transport {
           });
           this.logger.info('link_code_generated', { attempt: this.qrAttempt });
 
-          if (this.qrMax && this.qrAttempt >= this.qrMax) {
+          if (!this.awaitingRecoveryPairing && this.qrMax && this.qrAttempt >= this.qrMax) {
             return {
               outcome: 'qr_max',
               qrSeen: true,
@@ -1927,8 +2036,8 @@ export class Transport {
             };
           }
 
-          const linkCodeTimeoutMs = this.qrTimeoutMs === 0 ? 0 : this.qrTimeoutMs * 2;
-          const sessionLoaded = await this.waitForSessionLoaded(linkCodeTimeoutMs || this.authTimeoutMs);
+          const linkCodeTimeoutMs = this.awaitingRecoveryPairing || this.qrTimeoutMs === 0 ? 0 : this.qrTimeoutMs * 2;
+          const sessionLoaded = await this.waitForSessionLoaded(linkCodeTimeoutMs);
           return sessionLoaded
             ? {
               outcome: 'authenticated',
@@ -1951,60 +2060,41 @@ export class Transport {
       }
     }
 
-    const waitForever = this.qrTimeoutMs === 0 && this.authTimeoutMs === 0;
+    const qrData = await this.waitForQr();
+    if (!qrData) {
+      return this.resolveAuthTimeoutOutcome({
+        correlationId: 'auth-settle',
+        qrSeen: false,
+        authMethod: 'qr',
+      });
+    }
 
-    while (true) {
-      const qrData = await this.waitForQr();
-      if (!qrData) {
-        if (waitForever) {
-          this.logger.info('qr_wait_restarted', {
-            reason: 'qr_unavailable_or_page_context_changed',
-          });
-          await new Promise((resolve) => setTimeout(resolve, this.qrPollingMs));
-          continue;
-        }
-
-        return this.resolveAuthTimeoutOutcome({
-          correlationId: 'auth-settle',
-          qrSeen: false,
-          authMethod: 'qr',
-        });
-      }
-
-      const qrScanTimeoutMs = this.qrTimeoutMs === 0 ? 0 : this.qrTimeoutMs * 2;
-      const sessionLoaded = await this.waitForSessionLoaded(qrScanTimeoutMs || this.authTimeoutMs);
-      if (sessionLoaded) {
-        return {
-          outcome: 'authenticated',
-          qrSeen: true,
-          qrAttempts: this.qrAttempt,
-          authMethod: 'qr',
-        };
-      }
-
-      if (this.qrMax && this.qrAttempt >= this.qrMax) {
-        return {
-          outcome: 'qr_max',
-          qrSeen: true,
-          qrAttempts: this.qrAttempt,
-          authMethod: 'qr',
-        };
-      }
-
-      if (waitForever) {
-        this.logger.info('qr_wait_restarted', {
-          reason: 'qr_expired_or_page_context_changed',
-        });
-        continue;
-      }
-
+    const qrScanTimeoutMs = this.awaitingRecoveryPairing || this.qrTimeoutMs === 0 ? 0 : this.qrTimeoutMs * 2;
+    const sessionLoaded = await this.waitForSessionLoaded(qrScanTimeoutMs);
+    if (sessionLoaded) {
       return {
-        outcome: 'qr_timeout',
+        outcome: 'authenticated',
         qrSeen: true,
         qrAttempts: this.qrAttempt,
         authMethod: 'qr',
       };
     }
+
+    if (!this.awaitingRecoveryPairing && this.qrMax && this.qrAttempt >= this.qrMax) {
+      return {
+        outcome: 'qr_max',
+        qrSeen: true,
+        qrAttempts: this.qrAttempt,
+        authMethod: 'qr',
+      };
+    }
+
+    return {
+      outcome: 'qr_timeout',
+      qrSeen: true,
+      qrAttempts: this.qrAttempt,
+      authMethod: 'qr',
+    };
   }
 
   private async resolveAuthTimeoutOutcome(options: {
@@ -2067,17 +2157,77 @@ export class Transport {
   stopQrWatcher(): void {
     this.qrWatcherAbort?.abort();
     this.qrWatcherAbort = null;
+    if (this.qrPollTimer) clearTimeout(this.qrPollTimer);
+    this.qrPollTimer = undefined;
   }
 
   async evaluate<Arg, Ret>(fn: (arg: Arg) => Ret | Promise<Ret>, arg: Arg): Promise<Ret> {
     if (!this.page) {
       throw new Error('Transport not initialized');
     }
-    return this.page.evaluate(fn, arg);
+    const page = this.page;
+    return page.evaluate(fn, arg);
+  }
+
+  async evaluateScript<T = unknown>(script: string): Promise<T | null> {
+    const page = this.page;
+    if (!page || page.isClosed()) return null;
+    return page.evaluateScript<T>(script);
+  }
+
+  getActiveLivePatchPreload(): LivePatchPreloadResult | null { return this.activeLivePatchPreload; }
+  getEffectiveLicenseKey(): string | undefined { return this.effectiveLicenseKey; }
+  getDocumentGeneration(): GenerationSnapshot { return { ...this.injectionController.getHealthSnapshot().generation }; }
+  commitEffectiveLicenseKey(key: string | undefined): void { this.effectiveLicenseKey = key; }
+  setRuntimeRefreshHandler(handler: () => Promise<unknown>): void { this.refreshHandler = handler; }
+
+  async runPlannedRuntimeMutation<T>(operation: () => Promise<T>): Promise<T> {
+    this.plannedRuntimeMutation++;
+    ++this.latestRuntimeRecoveryRequestId;
+    clearTimeout(this.licenseRenewalTimer);
+    try {
+      await this.runtimeRecoveryQueue;
+      await this.injectionController.waitForIdle();
+      return await operation();
+    } finally { this.plannedRuntimeMutation--; this.scheduleLicenseRenewal(); }
+  }
+
+  async reloadPage(): Promise<void> {
+    if (!this.page || this.page.isClosed()) throw new Error('SESSION_REFRESH_PAGE_UNAVAILABLE');
+    this.runtimeRecoveryFailed = true;
+    await this.calling.invalidate('The session is refreshing. Attach fresh call media after it is ready.');
+    this.retainedLicenseArtifact = undefined;
+    this.licenseFeatures = { status: 'missing', keyType: null, expiresAt: null, features: {} };
+    await this.page.reload();
+    await this.injectionController.waitForIdle();
+  }
+
+  completeRuntimeReplacement(): void { this.runtimeRecoveryFailed = false; }
+
+  enableRuntimeRecovery(): void {
+    if (this.closed) return;
+    this.awaitingRecoveryPairing = false;
+    this.runtimeRecoveryEnabled = true;
   }
 
   getPage(): IPage | null {
     return this.page;
+  }
+
+  /** Read the QR currently shown by WhatsApp Web, including refreshed codes. */
+  async getCurrentQr(): Promise<string | null> {
+    if (!this.page || this.page.isClosed()) return null;
+    return this.page.evaluateScript<string | null>(QR_CHECK_SCRIPT).catch(() => null);
+  }
+
+  /** Ask WhatsApp Web to unlink this browser from the phone. */
+  async logoutLinkedDevice(): Promise<void> {
+    if (!this.page || this.page.isClosed()) throw new Error('WhatsApp browser page is unavailable');
+    await this.page.evaluateScript(`(async () => {
+      const logout = window.require?.('WAWebSocketLogoutUtils')?.sendCurrentLogout;
+      if (typeof logout !== 'function') throw new Error('WhatsApp logout action is unavailable');
+      await logout();
+    })()`);
   }
 
   getOperationalReadinessSnapshot(): TransportOperationalReadinessSnapshot {
@@ -2095,18 +2245,11 @@ export class Transport {
       generation: driverActiveGeneration ? { ...health.generation } : null,
       phase: health.phase,
       driverActiveGeneration,
-      runtimeOperational: health.runtimePresent && health.hasStoreMsg && health.sessionLoaded,
+      runtimeOperational: !this.runtimeRecoveryFailed && health.runtimePresent && health.hasStoreMsg && health.sessionLoaded,
       runtimeBridgeReady: health.bridgeReady && missingRuntimeMethods.length === 0,
       reinjectionSettled: this.pendingRuntimeRecoveryCount === 0,
       missingRuntimeMethods,
     };
-  }
-
-  async waitForOperationalReadiness(): Promise<TransportOperationalReadinessSnapshot> {
-    await this.injectionController.waitForIdle();
-    await this.runtimeRecoveryQueue;
-    await this.injectionController.waitForIdle();
-    return this.getOperationalReadinessSnapshot();
   }
 
   getBrowser(): IBrowser | null {
@@ -2114,23 +2257,31 @@ export class Transport {
   }
 
   async close(): Promise<void> {
-    this.disposePageListeners();
-    await this.injectionController.dispose();
-    if (this.page) {
-      await this.page.close();
-      this.page = null;
-    }
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
+    this.closed = true;
+    this.runtimeRecoveryEnabled = false;
+    ++this.latestRuntimeRecoveryRequestId;
+    clearTimeout(this.licenseRenewalTimer);
+    await this.calling.close();
+    this.licenseFeatures = { status: 'missing', keyType: null, expiresAt: null, features: {} };
+    this.stopQrWatcher();
+    try {
+      await this.portable.flush();
+    } finally {
+      this.disposePageListeners();
+      try {
+        await this.injectionController.dispose();
+        if (this.page) { await this.page.close(); this.page = null; }
+      } finally {
+        // Never release ownership while an old browser can still write.
+        if (this.browser) { await this.browser.close(); this.browser = null; }
+        await this.portable.release();
+      }
     }
     this.logger.info('transport_closed');
   }
 
   private async configurePageRuntime(page: IPage): Promise<void> {
     this.registerPageDiagnostics(page);
-
-    if (!this.options) this.options = {}
 
     // Inject self-healing watermark if configured
     if (this.options.watermark) {
@@ -2141,7 +2292,7 @@ export class Transport {
       await page.addInitScript(`
         (() => {
           if (window !== window.top) return;
-          
+
           let element = null;
           const bg = ${JSON.stringify(wbg)};
           const color = ${JSON.stringify(wcolor)};
@@ -2157,23 +2308,23 @@ export class Transport {
               host.style.height = '100vh';
               host.style.pointerEvents = 'none';
               host.style.zIndex = '2147483647';
-              
+
               const shadow = host.attachShadow({ mode: 'closed' });
-              
+
               const tint = document.createElement('div');
               tint.style.cssText = \`position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: \${bg}; pointer-events: none; mix-blend-mode: multiply;\`;
-              
+
               const text = document.createElement('div');
               text.style.cssText = \`position: absolute; bottom: 20px; right: 20px; color: \${color}; font-family: sans-serif; font-size: 24px; font-weight: bold; text-shadow: 1px 1px 2px rgba(255,255,255,0.8); pointer-events: none;\`;
               text.textContent = txt;
 
               shadow.appendChild(tint);
               shadow.appendChild(text);
-              
+
               document.documentElement.appendChild(host);
               element = host;
             }
-            
+
             if (element) {
               element.style.display = 'block';
               element.style.opacity = '1';
@@ -2228,9 +2379,14 @@ export class Transport {
         step: 'session_logout',
         details: { reason: 'post_logout=1' },
       });
+      // Startup owns its authentication wait and handles native logout there.
+      // Starting another client concurrently would race its browser and lease.
+      if (this.runtimeRecoveryEnabled) this.requestSessionRecovery('logged_out');
     });
 
     this.injectionController.registerNavigationObserver('runtime.navigation_recovery', (_frame, generation) => {
+      if (!this.runtimeRecoveryEnabled || this.plannedRuntimeMutation) return;
+      void this.calling.invalidate().catch(error => this.logger.warn('Calling media could not close after navigation', { message: String(error) }));
       this.logger.info(`FRAME NAV DETECTED ${this.frameNavCounter}, ${_frame.url()}, Reinjecting APIs...`);
       this.queueRuntimeRecovery('main_frame_navigation', generation);
       this.frameNavCounter++;
@@ -2414,7 +2570,7 @@ export class Transport {
     return scriptPromise;
   }
 
-  private static resolveAssetPath(assetFileName: 'launch.js' | 'wapi.js' | 'qr.min.js' | 'hash.js'): string {
+  private static resolveAssetPath(assetFileName: 'launch.js' | 'wapi.js' | 'qr.min.js' | 'hash.js' | 'patches.json'): string {
     const moduleDir = Transport.resolveCurrentModuleDir();
     const candidates = [
       join(moduleDir, 'assets', assetFileName),
@@ -2458,7 +2614,8 @@ export class Transport {
         throw new Error('Unable to determine current module path for launch.js resolution');
       }
 
-      return dirname(fileName);
+      // Node ESM stack frames contain file URLs; filesystem lookups need paths.
+      return dirname(fileName.startsWith('file:') ? fileURLToPath(fileName) : fileName);
     } finally {
       Error.prepareStackTrace = originalPrepareStackTrace;
     }
@@ -2476,22 +2633,9 @@ export class Transport {
     trigger: 'main_frame_navigation' | 'runtime_replaced',
     generation?: GenerationSnapshot,
   ): void {
-    const targetGeneration = generation ?? this.injectionController.captureGenerationSnapshot();
-    const recoveryKey = [
-      trigger,
-      targetGeneration.documentId,
-      targetGeneration.runtimeId ?? 'no-runtime',
-    ].join(':');
-
-    if (this.queuedRuntimeRecoveryKeys.has(recoveryKey)) {
-      this.logger.debug('runtime_recovery_coalesced', {
-        trigger,
-        recoveryKey,
-      });
-      return;
-    }
-
-    this.queuedRuntimeRecoveryKeys.add(recoveryKey);
+    // Bootstrap owns the initial document until it has finished installing every
+    // artifact. Navigation and WAPI replacement callbacks must not race it.
+    if (!this.runtimeRecoveryEnabled || this.plannedRuntimeMutation) return;
     const requestId = ++this.latestRuntimeRecoveryRequestId;
     this.pendingRuntimeRecoveryCount += 1;
 
@@ -2502,15 +2646,34 @@ export class Transport {
     });
 
     this.runtimeRecoveryQueue = this.runtimeRecoveryQueue.then(
-      () => this.runRuntimeRecovery({ requestId, trigger, generation: targetGeneration, recoveryKey }),
-      () => this.runRuntimeRecovery({ requestId, trigger, generation: targetGeneration, recoveryKey }),
+      () => this.recoverDocument({ requestId, trigger, generation }),
+      () => this.recoverDocument({ requestId, trigger, generation }),
     ).catch((error) => {
+      this.runtimeRecoveryFailed = true;
+      if (error instanceof SessionRecoveryRequired || (error instanceof Error && error.message === 'PORTABLE_SESSION_ACTIVATE_FAILED')) {
+        this.requestSessionRecovery(error.message);
+        return;
+      }
       this.logger.warn('runtime_recovery_failed', {
         trigger,
         requestId: String(requestId),
         error: error instanceof Error ? error.message : String(error),
       });
     });
+  }
+
+  private async recoverDocument(request: Parameters<Transport['runRuntimeRecovery']>[0]): Promise<void> {
+    // Own callbacks during recovery itself without waiting on our own queue.
+    this.plannedRuntimeMutation++;
+    clearTimeout(this.licenseRenewalTimer);
+    try {
+      await this.runRuntimeRecovery(request);
+    }
+    catch (error) { this.runtimeRecoveryFailed = true; throw error; }
+    finally {
+      this.plannedRuntimeMutation--;
+      this.scheduleLicenseRenewal();
+    }
   }
 
   private isLatestRuntimeRecoveryRequest(requestId: number): boolean {
@@ -2520,24 +2683,17 @@ export class Transport {
   private async runRuntimeRecovery(request: {
     requestId: number;
     trigger: 'main_frame_navigation' | 'runtime_replaced';
-    generation: GenerationSnapshot;
-    recoveryKey: string;
+    generation?: GenerationSnapshot;
   }): Promise<void> {
     try {
       if (!this.page) {
         return;
       }
 
-      // Guard: prevent infinite recovery loops
-      this.consecutiveRecoveryAttempts++;
-      if (this.consecutiveRecoveryAttempts > MAX_CONSECUTIVE_RECOVERY_ATTEMPTS) {
-        this.logger.warn('runtime_recovery_max_attempts_exceeded', {
-          trigger: request.trigger,
-          attempts: this.consecutiveRecoveryAttempts,
-          max: MAX_CONSECUTIVE_RECOVERY_ATTEMPTS,
-          requestId: String(request.requestId),
-        });
-        return;
+      if (!this.runtimeRecoveryEnabled || !this.isLatestRuntimeRecoveryRequest(request.requestId)) return;
+      if (this.page.url().includes('post_logout=1')
+        || await this.evaluateBooleanScript(`Boolean(${QR_CHECK_SCRIPT})`)) {
+        throw new SessionRecoveryRequired('authentication_lost');
       }
 
       const settledGeneration = await this.injectionController.waitForIdle();
@@ -2571,27 +2727,26 @@ export class Transport {
         return;
       }
 
-      // ── Early-exit: check if the session survived the frame nav ──
-      // Frame navigation does NOT always flush the global context. Before doing
-      // heavy recovery (reinject wapi + patches + bridge), probe whether:
-      //   1. The page is still injectable (WAWebCollections module available)
-      //   2. Live patches are still applied (window.moi exists — it's injected by
-      //      CDN live patches, NOT by wapi.js, so its presence proves patches survived)
-      // If both pass, the session is intact — skip recovery entirely.
+      // A navigation can keep the current runtime. Wait for WhatsApp's visible
+      // screen before deciding between QR pairing and restoring the bindings.
       if (request.trigger === 'main_frame_navigation') {
         try {
           const injectable = await this.waitForInjectableSession();
           if (injectable) {
+            if (await this.evaluateBooleanScript(`Boolean(${QR_CHECK_SCRIPT})`)) {
+              throw new SessionRecoveryRequired('authentication_lost');
+            }
             const livePatchIntact = await this.evaluateBooleanScript(
               `!!(typeof window.moi === 'function' && window.moi())`
             );
             if (livePatchIntact) {
+              await this.calling.bind();
+              this.scheduleLicenseRenewal();
               this.logger.info('runtime_recovery_skipped_session_intact', {
                 trigger: request.trigger,
                 requestId: String(request.requestId),
                 reason: 'live_patches_intact_after_frame_nav',
               });
-              this.consecutiveRecoveryAttempts = 0;
               return;
             }
             this.logger.debug('runtime_recovery_live_patches_missing', {
@@ -2600,6 +2755,7 @@ export class Transport {
             });
           }
         } catch (probeError) {
+          if (probeError instanceof SessionRecoveryRequired) throw probeError;
           // Probe failed — session is likely flushed, proceed with full recovery
           this.logger.debug('runtime_recovery_integrity_probe_failed', {
             trigger: request.trigger,
@@ -2609,21 +2765,11 @@ export class Transport {
         }
       }
 
-      const { capability, reinjected } = await this.recoverRuntimeForCurrentDocument({
+      const { reinjected } = await this.recoverRuntimeForCurrentDocument({
         trigger: request.trigger,
         shouldContinue: () => this.isLatestRuntimeRecoveryRequest(request.requestId),
-        forceReinject: request.trigger === 'runtime_replaced',
+        forceReinject: true,
       });
-
-      if (!this.isLatestRuntimeRecoveryRequest(request.requestId)) {
-        return;
-      }
-
-      if (!capability.hasRuntime || (capability.sessionLoaded && !capability.hasStoreMsg)) {
-        throw new Error(
-          `Runtime recovery postconditions failed: ${JSON.stringify(capability)}`,
-        );
-      }
 
       this.logger.info('runtime_recovery_completed', {
         trigger: request.trigger,
@@ -2632,11 +2778,8 @@ export class Transport {
         generation: settledGeneration,
       });
 
-      // Reset consecutive counter on successful recovery
-      this.consecutiveRecoveryAttempts = 0;
-    } finally {
+      } finally {
       this.pendingRuntimeRecoveryCount = Math.max(0, this.pendingRuntimeRecoveryCount - 1);
-      this.queuedRuntimeRecoveryKeys.delete(request.recoveryKey);
     }
   }
 
@@ -2682,58 +2825,23 @@ export class Transport {
       }
     }
 
-    // ── Step 1: Reinject wapi.js + launch.js + cached live patches ──
-    // performRuntimeInjection already re-applies cached live patch scripts.
-    const reinjected = await this.performRuntimeInjection(shouldContinue, 'runtime_recovery');
-    if (!shouldContinue()) {
-      capability = await this.probeRuntimeCapability();
-      return { capability, reinjected };
-    }
-
-    // ── Step 2: Re-apply init patch + wire bridge ──
-    // ONLY for actual context-flush recovery (frame nav / runtime_replaced) where
-    // the full patch stack was previously applied and needs restoration.
-    //
-    // For post_authentication and validation_failure, the bootstrap sequence in
-    // createClient.ts manages the correct layering order:
-    //   wapi → live patches (CDN) → license → init patch → bridge wiring
-    // Applying init_patch here would be premature (before live patches exist)
-    // and causes "Identifier already declared" when bootstrap tries again later.
-    const isContextFlushRecovery = options.trigger === 'main_frame_navigation'
-      || options.trigger === 'runtime_replaced';
-
-    if (reinjected && isContextFlushRecovery) {
-      try {
-        this.logger.info('recovery_reapplying_init_patch', {
-          trigger: options.trigger,
-        });
-        await injectInitPatch(this.page!);
-        this.logger.debug('recovery_init_patch_reapplied', {
-          trigger: options.trigger,
-        });
-      } catch (initPatchError) {
-        const msg = initPatchError instanceof Error ? initPatchError.message : String(initPatchError);
-        this.logger.warn('recovery_init_patch_reapply_failed', {
-          trigger: options.trigger,
-          error: msg,
-        });
-      }
-
-      // ── Step 3: Wire the bridge (AFTER all patches are applied) ──
-      // This matches the v4 order: patches → init → client.loaded() (bridge)
-      try {
-        const bridgeReady = await this.injectionController.ensureRuntimeBridge();
-        this.logger.info('recovery_bridge_wired', {
-          trigger: options.trigger,
-          bridgeReady,
-        });
-      } catch (bridgeError) {
-        const msg = bridgeError instanceof Error ? bridgeError.message : String(bridgeError);
-        this.logger.warn('recovery_bridge_wiring_failed', {
-          trigger: options.trigger,
-          error: msg,
-        });
-      }
+    const contextRecovery = options.trigger === 'main_frame_navigation' || options.trigger === 'runtime_replaced';
+    const reinjected = await this.performRuntimeInjection(shouldContinue, !contextRecovery);
+    if (!shouldContinue()) return { capability: await this.probeRuntimeCapability(), reinjected };
+    if (contextRecovery && !reinjected) throw new Error('The base runtime could not be restored.');
+    if (reinjected && contextRecovery) {
+      const documentId = this.getDocumentGeneration().documentId;
+      const patches = this.activeLivePatchPreload;
+      if (!patches) throw new Error('No complete public installation is available for document recovery.');
+      await this.calling.invalidate();
+      await installDocumentRuntime(this, { ...patches, artifacts: patches.artifacts.map(artifact => ({ ...artifact, required: artifact.source !== 'builtin' || artifact.required })) }, async () => {
+        if (this.getDocumentGeneration().documentId !== documentId || !shouldContinue()) throw new Error('Document recovery was superseded.');
+        const license = await this.preloadLicenseArtifact({ sessionId: this.options.sessionId ?? 'session',
+          licenseKey: this.effectiveLicenseKey, sessionInfo: await this.getSessionDebugInfo(), strict: true });
+        return license;
+      });
+      if (this.getDocumentGeneration().documentId !== documentId || !shouldContinue()) throw new Error('Document recovery was superseded.');
+      this.completeRuntimeReplacement();
     }
 
     capability = await this.probeRuntimeCapability();
@@ -2744,17 +2852,7 @@ export class Transport {
     };
   }
 
-  private async performRuntimeInjection(
-    shouldContinue: () => boolean = () => true,
-    mutationKind: RuntimeMutationKind = 'runtime_install',
-  ): Promise<boolean> {
-    return this.withRuntimeMutationLease(
-      mutationKind,
-      () => this.performRuntimeInjectionUnderLease(shouldContinue),
-    );
-  }
-
-  private async performRuntimeInjectionUnderLease(shouldContinue: () => boolean): Promise<boolean> {
+  private async performRuntimeInjection(shouldContinue: () => boolean = () => true, reuseCachedPatches = true): Promise<boolean> {
     if (!this.page) {
       throw new Error('Transport not initialized');
     }
@@ -2819,7 +2917,7 @@ export class Transport {
     // Without this, the freshly injected WAPI overwrites the live-patched version,
     // causing onStateChanged (and similar methods) to fail and triggering an
     // infinite recovery loop.
-    if (success && this.cachedLivePatchScripts.length > 0) {
+    if (success && reuseCachedPatches && this.cachedLivePatchScripts.length > 0) {
       this.logger.info('recovery_reapplying_live_patches', {
         count: this.cachedLivePatchScripts.length,
       });
@@ -2836,63 +2934,6 @@ export class Transport {
     }
 
     return success;
-  }
-
-  private async withRuntimeMutationLease<T>(
-    kind: RuntimeMutationKind,
-    task: () => Promise<T>,
-  ): Promise<T> {
-    if (!this.page) {
-      throw new Error('Transport not initialized');
-    }
-
-    const page = this.page;
-    const generation = this.injectionController.captureGenerationSnapshot();
-    const token = `${generation.documentId}:${++this.runtimeMutationLeaseSequence}:${Date.now()}`;
-    const startedAt = Date.now();
-
-    await page.evaluate((lease) => {
-      const root = globalThis as typeof globalThis & {
-        __OPENWA_RUNTIME_MUTATION_LEASE__?: typeof lease;
-      };
-      root.__OPENWA_RUNTIME_MUTATION_LEASE__ = lease;
-    }, {
-      token,
-      kind,
-      documentId: generation.documentId,
-      startedAt,
-      expiresAt: startedAt + RUNTIME_MUTATION_LEASE_TTL_MS,
-    });
-
-    try {
-      return await task();
-    } finally {
-      await page.evaluate((expectedToken) => {
-        const root = globalThis as typeof globalThis & {
-          __OPENWA_RUNTIME_MUTATION_LEASE__?: { token?: string };
-        };
-        if (root.__OPENWA_RUNTIME_MUTATION_LEASE__?.token === expectedToken) {
-          delete root.__OPENWA_RUNTIME_MUTATION_LEASE__;
-        }
-      }, token).catch((error) => {
-        this.logger.debug('runtime_mutation_lease_release_failed', {
-          kind,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-    }
-  }
-
-  private async probeBrokenMethodIntegrity(): Promise<RuntimeMethodIntegrityResult> {
-    const requiredMethods = this.injectionController.getRequiredRuntimeMethods();
-    const bridgeReady = await this.injectionController.ensureRuntimeBridge();
-    const health = this.injectionController.getHealthSnapshot();
-
-    return {
-      bridgeReady,
-      requiredMethods,
-      missingMethods: health.missingRuntimeMethods,
-    };
   }
 
   private async waitForFunctionProbe(
@@ -2941,20 +2982,14 @@ export class Transport {
   private deriveLicenseKeyType(key: string): string {
     const normalizedKey = key.trim();
     const [head] = normalizedKey.split(/[-:]/);
-    if (!head) {
-      return 'license';
-    }
-
-    if (/^(invalid|expired)$/i.test(head)) {
-      return 'license';
-    }
-
-    return head.toLowerCase();
+    return /^(insiders|restricted)$/i.test(head ?? '')
+      ? head.toLowerCase()
+      : 'license';
   }
 
   private maskLicenseKey(key: string): string {
     if (key.length <= 4) {
-      return key;
+      return '****';
     }
 
     return `${'*'.repeat(Math.max(0, key.length - 4))}${key.slice(-4)}`;
@@ -3016,10 +3051,23 @@ export class Transport {
       }
     }
 
+    // Default: use core bundled patches (offline, zero external network dependency) unless explicit remote patch requested
+    if (this.patchConfig.ghPatch !== true) {
+      try {
+        const bundled = await this.loadBundledLivePatches();
+        if (bundled.data.length > 0) {
+          this.logger.info('live_patch_loaded_from_bundled', { tag: bundled.tag, patchCount: bundled.data.length });
+          return { data: bundled.data, tag: bundled.tag, source: 'cached' };
+        }
+      } catch (err) {
+        this.logger.debug('bundled_patches_load_failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     const result = await this.fetchFreshLivePatches(sessionInfo);
     this.logger.info('live_patch_downloaded', {
       source: 'remote',
-      url: this.patchConfig.patchesUrl ?? DEFAULT_LIVE_PATCHES_URL,
+      url: DEFAULT_LIVE_PATCHES_URL,
       tag: result.tag,
       patchCount: result.data.length,
     });
@@ -3036,10 +3084,9 @@ export class Transport {
     }
   }
 
-  private async fetchFreshLivePatches(sessionInfo?: SessionDebugInfo): Promise<{ data: string[]; tag: string }> {
-    const patchesUrl = this.patchConfig.patchesUrl ?? DEFAULT_LIVE_PATCHES_URL;
+  private async fetchFreshLivePatches(sessionInfo?: SessionDebugInfo, fresh = false): Promise<{ data: string[]; tag: string }> {
     const useGithubPrimary = this.patchConfig.ghPatch === true;
-    const primaryUrl = useGithubPrimary ? GH_LIVE_PATCHES_FALLBACK_URL : patchesUrl;
+    const primaryUrl = useGithubPrimary ? GH_LIVE_PATCHES_FALLBACK_URL : DEFAULT_LIVE_PATCHES_URL;
     const fallbackUrl = useGithubPrimary
       ? undefined
       : this.patchConfig.ghPatchFallback === false
@@ -3047,13 +3094,15 @@ export class Transport {
         : GH_LIVE_PATCHES_FALLBACK_URL;
 
     const fetchStart = Date.now();
+    const fetchOptions: { fallbackUrl?: string; fresh?: boolean } = { fallbackUrl };
+    if (fresh) fetchOptions.fresh = true;
     const result = await fetchPatches(
       primaryUrl,
       {
         waVersion: sessionInfo?.WA_VERSION,
         waAutomateVersion: sessionInfo?.WA_AUTOMATE_VERSION,
       },
-      { fallbackUrl },
+      fetchOptions,
     );
     const fetchDurationMs = Date.now() - fetchStart;
 
@@ -3102,6 +3151,21 @@ export class Transport {
     return { data: parsed.data, tag: parsed.tag };
   }
 
+  private async loadBundledLivePatches(): Promise<{ data: string[]; tag: string }> {
+    try {
+      const assetPath = Transport.resolveAssetPath('patches.json');
+      const raw = await readFile(assetPath, 'utf-8');
+      const data = JSON.parse(raw);
+      if (Array.isArray(data)) {
+        const tag = createHash('md5').update(raw).digest('hex').slice(0, 5);
+        return { data, tag };
+      }
+    } catch (err) {
+      this.logger.debug('bundled_patches_load_failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+    return { data: [], tag: 'bundled' };
+  }
+
   private async saveCachedLivePatches(result: { data: string[]; tag: string }): Promise<void> {
     const cachePath = join(process.cwd(), LIVE_PATCH_CACHE_FILENAME);
     await writeFile(cachePath, JSON.stringify({ data: result.data, tag: result.tag }), 'utf-8');
@@ -3123,12 +3187,20 @@ export class Transport {
     }
 
     const info = await this.page.evaluate(
-      () => ({
-        waVersion: (globalThis as any).Debug?.VERSION ?? 'unknown',
-        hostNumber: (globalThis as any).Store?.Conn?.me?._serialized ?? '',
-        pageUA: navigator.userAgent,
-        os: navigator.platform ?? 'unknown',
-      }),
+      () => {
+        const runtime = globalThis as any;
+        const connectionIdentity = runtime.Store?.Conn?.me?._serialized;
+        const connectionHost = typeof connectionIdentity === 'string' && connectionIdentity.endsWith('@c.us')
+          ? connectionIdentity : '';
+        const patchedHost = typeof runtime.moi === 'function' ? runtime.moi() : '';
+
+        return {
+          waVersion: runtime.Debug?.VERSION ?? 'unknown',
+          hostNumber: (typeof patchedHost === 'string' ? patchedHost : '') || connectionHost,
+          pageUA: navigator.userAgent,
+          os: navigator.platform ?? 'unknown',
+        };
+      },
       undefined,
     );
 

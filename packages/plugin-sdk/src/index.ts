@@ -21,10 +21,10 @@
  */
 
 // Factory
-export { createPlugin, type CreatePluginOptions } from './createPlugin.js';
+export { createPlugin, type CreatePluginOptions } from './createPlugin';
 
 // Config helpers
-export { defineConfig, z } from './defineConfig.js';
+export { defineConfig, z } from './defineConfig';
 
 // Types
 export type {
@@ -36,6 +36,8 @@ export type {
 
   // Client interface
   PluginClient,
+  PluginRuntime,
+  PluginServices,
 
   // Events & Logger
   PluginEventEmitter,
@@ -43,6 +45,9 @@ export type {
 
   // Dashboard
   DashboardPage,
+  PluginPageHost,
+  PluginChatProps,
+  PluginChatEntry,
 
   // Tools
   ToolDefinition,
@@ -51,4 +56,4 @@ export type {
   // Manifest (consumed by dashboard)
   PluginManifest,
   PluginManifestEntry,
-} from './types.js';
+} from './types';

@@ -1,16 +1,20 @@
-import type { Client } from '../Client.js';
+import type { Client } from '../Client';
 import type {
   ChatId,
   ContactId,
   Contact,
+  NumberCheck,
   GroupId,
+  MessageId,
 } from '@open-wa/schema';
-import { createUnsupportedMethodStub } from '../runtimeSurface.js';
+import { chatIdCodec, MessageIdSchema } from '@open-wa/schema';
+import { invokePatch } from '../patchRuntime';
+import { createUnsupportedMethodStub } from '../runtimeSurface';
 
 declare const WAPI: {
   getContact: (contactId: string) => Contact;
   getAllContacts: () => Contact[];
-  checkNumberStatus: (contactId: string) => Promise<{ canReceiveMessage: boolean; numberExists: boolean; id: string }>;
+  checkNumberStatus: (contactId: string) => Promise<NumberCheck>;
   getProfilePicFromServer: (chatId: string) => Promise<string | null>;
   contactBlock: (contactId: string) => Promise<boolean>;
   contactUnblock: (contactId: string) => Promise<boolean>;
@@ -21,10 +25,12 @@ declare const WAPI: {
 };
 
 export interface ContactMethods {
+  requestPhoneNumber(to: string): Promise<MessageId>;
+  sharePhoneNumber(to: string): Promise<MessageId>;
   getContact(contactId: ContactId): Promise<Contact | null>;
   getAllContacts(): Promise<Contact[]>;
   getContactById(contactId: ContactId): Promise<Contact | null>;
-  checkNumberStatus(contactId: ContactId): Promise<{ canReceiveMessage: boolean; numberExists: boolean; id: string }>;
+  checkNumberStatus(contactId: ContactId): Promise<NumberCheck>;
   getProfilePic(chatId: ChatId): Promise<string | null>;
   blockContact(contactId: ContactId): Promise<boolean>;
   unblockContact(contactId: ContactId): Promise<boolean>;
@@ -40,6 +46,12 @@ export function contactMethods(client: Client): ContactMethods {
   const unsupportedGetCommonGroups = createUnsupportedMethodStub<ContactMethods['getCommonGroups']>('getCommonGroups');
   
   return {
+    async requestPhoneNumber(to) {
+      return MessageIdSchema.parse(await invokePatch(client, 'requestPhoneNumber', [chatIdCodec.decode(to)]));
+    },
+    async sharePhoneNumber(to) {
+      return MessageIdSchema.parse(await invokePatch(client, 'sharePhoneNumber', [chatIdCodec.decode(to)]));
+    },
     async getContact(contactId: ContactId): Promise<Contact | null> {
       return evaluate(
         ({ contactId }) => WAPI.getContact(contactId),
@@ -61,7 +73,7 @@ export function contactMethods(client: Client): ContactMethods {
       );
     },
     
-    async checkNumberStatus(contactId: ContactId): Promise<{ canReceiveMessage: boolean; numberExists: boolean; id: string }> {
+    async checkNumberStatus(contactId: ContactId): Promise<NumberCheck> {
       return evaluate(
         ({ contactId }) => WAPI.checkNumberStatus(contactId),
         { contactId }

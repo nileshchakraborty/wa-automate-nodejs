@@ -1,6 +1,17 @@
+import { ContactIdSchema, ContactSchema } from '../common-types';
+import { CommonGroupSchema, NumberCheckSchema, NumberProfileSchema } from '../return-types';
 import { z } from 'zod';
 import { defineMethodV2 } from '../registry';
-import { chatIdParam, contactIdParam } from '../parameters';
+import { chatIdParam, contactIdParam, toParam, messageIdParam } from '../parameters';
+
+export const requestPhoneNumber = defineMethodV2('requestPhoneNumber', {
+    meta: { description: 'Ask a direct LID chat to voluntarily share their phone number. A submitted request does not confirm sharing.', action: 'send', namespace: 'contacts', license: 'none', functionality: 'both', httpMethod: 'POST' },
+    input: z.object({ to: toParam }), parameterOrder: ['to'], output: messageIdParam,
+});
+export const sharePhoneNumber = defineMethodV2('sharePhoneNumber', {
+    meta: { description: 'Share the signed-in account’s own phone number with a direct LID chat using WhatsApp’s native protocol. No arbitrary phone number is accepted.', action: 'send', namespace: 'contacts', license: 'none', functionality: 'both', httpMethod: 'POST' },
+    input: z.object({ to: toParam }), parameterOrder: ['to'], output: messageIdParam,
+});
 
 export const getAllContacts = defineMethodV2('getAllContacts', {
     meta: {
@@ -13,7 +24,7 @@ export const getAllContacts = defineMethodV2('getAllContacts', {
     },
     input: z.object({}),
     parameterOrder: [],
-    output: z.array(z.any()),
+    output: z.array(ContactSchema),
 });
 
 export const getContact = defineMethodV2('getContact', {
@@ -27,7 +38,7 @@ export const getContact = defineMethodV2('getContact', {
     },
     input: z.object({ contactId: contactIdParam }),
     parameterOrder: ['contactId'],
-    output: z.any(),
+    output: ContactSchema.nullable(),
 });
 
 export const getCommonGroups = defineMethodV2('getCommonGroups', {
@@ -41,7 +52,7 @@ export const getCommonGroups = defineMethodV2('getCommonGroups', {
     },
     input: z.object({ contactId: contactIdParam }),
     parameterOrder: ['contactId'],
-    output: z.any(),
+    output: z.array(CommonGroupSchema).or(z.literal(false)),
 });
 
 export const getNumberProfile = defineMethodV2('getNumberProfile', {
@@ -55,7 +66,7 @@ export const getNumberProfile = defineMethodV2('getNumberProfile', {
     },
     input: z.object({ contactId: contactIdParam }),
     parameterOrder: ['contactId'],
-    output: z.any(),
+    output: NumberProfileSchema,
 });
 
 export const getBlockedIds = defineMethodV2('getBlockedIds', {
@@ -69,7 +80,7 @@ export const getBlockedIds = defineMethodV2('getBlockedIds', {
     },
     input: z.object({}),
     parameterOrder: [],
-    output: z.array(z.string()),
+    output: z.array(ContactIdSchema).or(z.literal(false)),
 });
 
 export const blockContact = defineMethodV2('blockContact', {
@@ -136,7 +147,7 @@ export const checkNumberStatus = defineMethodV2('checkNumberStatus', {
     },
     input: z.object({ contactId: contactIdParam }),
     parameterOrder: ['contactId'],
-    output: z.any(),
+    output: NumberCheckSchema,
 });
 
 export const getProfilePicture = defineMethodV2('getProfilePicture', {

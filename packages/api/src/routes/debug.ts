@@ -11,9 +11,24 @@ export function registerDebugRoutes(
   options: {
     config: Config;
     getConfig: () => Config;
+    getDiagnostics: () => {
+      available: boolean;
+      captureSource: 'session event bridge';
+      captureLimit: number;
+      records: unknown[];
+    };
     setIntegration?: (id: string, data: { enabled: boolean; config: Record<string, string> }) => void;
   }
 ) {
+  // Error records can contain runtime details, so require the configured Easy API key.
+  app.get('/meta/debug/diagnostics', (c: any) => {
+    const apiKey = options.config.apiKey;
+    if (!apiKey || c.req.header('X-API-Key') !== apiKey) {
+      return c.json({ error: 'Unauthorized', details: 'Invalid or missing API key' }, 401);
+    }
+    return c.json(options.getDiagnostics());
+  });
+
   // ─── Memory Metrics ──────────────────────────────────────────────
   app.get('/meta/debug/memory', (c: any) => {
     const mem = process.memoryUsage();
@@ -32,7 +47,8 @@ export function registerDebugRoutes(
     const config = options.getConfig();
     // Redact sensitive fields
     const redacted = { ...config } as Record<string, unknown>;
-    const sensitiveKeys = ['apiKey', 'licenseKey', 'elasticPassword', 'elasticUsername'];
+    const sensitiveKeys = ['apiKey', 'licenseKey', 'elasticPassword', 'elasticUsername', 'sessionData', 'sessionDataBucketAuth',
+      'sessionDataEncryptionKey', 'sessionDataEncryptionKeyFile', 'pluginConfig'];
     for (const key of sensitiveKeys) {
       if (redacted[key]) {
         redacted[key] = '***REDACTED***';
@@ -43,7 +59,7 @@ export function registerDebugRoutes(
       redacted.proxyServerCredentials = { ...redacted.proxyServerCredentials as Record<string, unknown>, password: '***REDACTED***' };
     }
     if (redacted.s3Sync) {
-      redacted.s3Sync = { ...redacted.s3Sync as Record<string, unknown>, secretAccessKey: '***REDACTED***' };
+      redacted.s3Sync = { ...redacted.s3Sync as Record<string, unknown>, accessKeyId: '***REDACTED***', secretAccessKey: '***REDACTED***', sessionToken: '***REDACTED***', headers: '***REDACTED***' };
     }
     return c.json(redacted);
   });

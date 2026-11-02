@@ -1,31 +1,59 @@
 name: Build & Deploy Documentation
+run-name: ${{ inputs.release_version && format('Docs {0} / {1}', inputs.release_version, inputs.release_request_id) || 'Build & Deploy Documentation' }}
 
 # Builds the v5 docs app (apps/docs) and deploys it to Cloudflare Workers
 # (the `openwa-docs` worker, per apps/docs/wrangler.jsonc).
 #
-# Requires two repo secrets: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
+# Uses CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in the Docs environment.
 
 on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: Release being deployed (set by the release action)
+        required: false
+        type: string
+      release_request_id:
+        description: Release deployment identifier
+        required: false
+        type: string
   push:
     branches: [master]
     paths:
       - 'apps/docs/**'
       - 'packages/schema/**'
       - 'packages/config/**'
+      - 'packages/client/src/**'
+      - 'packages/ui-components/**'
+      - 'packages/*/README.md'
+      - 'packages/*/package.json'
+      - 'integrations/*/README.md'
+      - 'integrations/*/package.json'
+      - 'apps/*/README.md'
+      - 'apps/*/package.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - '.github/workflows/docs-run.yml'
 
 concurrency:
-  group: docs-deploy
-  cancel-in-progress: true
+  group: ${{ inputs.release_version && format('docs-release-{0}', inputs.release_version) || 'docs-deploy' }}
+  cancel-in-progress: ${{ !inputs.release_version }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: Docs
+      url: https://openwa.dev/docs
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_version && format('v{0}', inputs.release_version) || github.ref }}
 
       - uses: pnpm/action-setup@v4
 
@@ -53,6 +81,14 @@ jobs:
         run: pnpm --filter docs build
         env:
           PUPPETEER_SKIP_DOWNLOAD: '1'
+
+      - name: Apply documentation feedback migrations
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/docs
+          command: d1 migrations apply openwa-docs-feedback --remote
 
       - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@v3

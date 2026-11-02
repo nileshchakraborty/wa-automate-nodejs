@@ -36,7 +36,7 @@ export class SessionManager {
         sessionId: this.config.sessionId,
         intervalMs: this.config.syncInterval || 600000
       });
-      
+
       await this.localCompression.start();
       this.logger.info('Local session compression started');
     }
@@ -44,7 +44,7 @@ export class SessionManager {
     // Start S3 sync if configured
     if (this.config.enableS3Backup && this.config.s3Config) {
       this.s3Sync = new S3SyncManager(this.config.s3Config);
-      
+
       // Start periodic S3 sync
       this.startPeriodicSync();
       this.logger.info('S3 session sync started');
@@ -77,7 +77,7 @@ export class SessionManager {
     try {
       // Find the latest compressed session file
       const sessionZstPath = `${this.config.dataDir}/${this.config.sessionId}.data.zst`;
-      
+
       const filename = await this.s3Sync.backupSession(sessionZstPath);
       this.logger.info('Session backed up to S3', { filename });
       return filename;
@@ -134,7 +134,7 @@ export class SessionManager {
 
   static createFromConfig(clientConfig: ClientConfig): SessionManager {
     const s3Config = clientConfig.s3Sync;
-    
+
     return new SessionManager({
       sessionId: clientConfig.sessionId || 'session',
       dataDir: clientConfig.sessionDataPath || './.wwebjs',

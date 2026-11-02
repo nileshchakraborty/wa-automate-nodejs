@@ -236,8 +236,8 @@ export const demoPatches = [
 export const demoLicense = {
   status: "valid" as const,
   source: "cached" as const,
-  keyType: "premium",
-  detail: "License validated from local cache",
+  keyType: "insiders",
+  detail: "Licence tier verified by the selected runtime session",
 }
 
 export const demoReconnections = [
@@ -296,7 +296,7 @@ export function resolveDemoAsk(method: string, _args?: unknown): unknown {
     case "getConnectionState": return demoSession.connectionState
     case "getAllChats": return demoChats
     case "getAllContacts": return demoContacts
-    case "getAllMessagesInChat": {
+    case "getAllMessages": {
       const a = _args as { chatId?: string } | undefined
       return demoMessages[a?.chatId || ""] || []
     }

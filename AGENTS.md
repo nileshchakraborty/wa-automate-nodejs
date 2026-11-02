@@ -1,5 +1,10 @@
 # Repository Instructions
 
+When this fork is built for the RPi deployment, also follow the shared
+platform rules in [`../rpi-local-platform/AGENTS.md`](../rpi-local-platform/AGENTS.md)
+and the deployment-specific guide in
+[`../appointment-notifier/AGENTS.md`](../appointment-notifier/AGENTS.md).
+
 ## Commit Policy
 
 All commits created for this repository must use gitmoji-prefixed Conventional
@@ -13,6 +18,25 @@ Format:
 
 The scope is optional. Keep the description imperative, concise, and no longer
 than 72 characters when practical.
+
+### Issue references
+
+Every commit for work related to an issue must append that issue reference to
+the commit message. Use a final `Refs #123` paragraph by default; use
+`Fixes #123` only when the commit fully resolves that issue. Include all known
+relevant issues, including for supporting documentation, tests, and follow-up
+fixes. A reference on a PR alone is not sufficient.
+
+```text
+🐛 fix(session): recover unusable sessions with fresh QR pairing
+
+Refs #3550
+```
+
+Use the full issue URL for an issue in another repository. Do not substitute
+PR numbers for issue references, invent references, or create an issue merely
+to give an unrelated commit a reference. Release notes must link the referenced
+issues alongside the commits.
 
 ### No AI attribution
 
@@ -105,8 +129,8 @@ primary purpose.
   artifacts unless the user explicitly asks for a tracked artifact.
 - Check staged content before committing so sensitive files are not included.
 - Run `git status` after each commit to verify the remaining work.
-- If pushing, check the current branch first and warn before pushing directly to
-  `main` or `master`.
+- Development commits go directly to `master`; do not create development PRs
+  unless Mohammed asks for one. Check the current branch before pushing.
 - Do not force push unless the user explicitly requests it.
 
 ### Push Workflow
@@ -131,24 +155,49 @@ stop and report the issue instead of forcing a push.
 
 ## Release Process
 
-Publishing is driven by Changesets and the `release` branch — **not** `master`.
+Publishing is driven by Bumpy and the `release` branch.
 
-- Development and changesets land on `master`. Merging PRs to `master` never
-  publishes.
-- The **`release`** branch is a publish-trigger mirror of `master`. A push to
-  `release` runs `.github/workflows/release.yml`.
-- To cut a release:
-  1. Reconcile `release` to `master`: `git push origin origin/master:release --force`
-     (release is a mirror; its only unique history is auto-generated version/
-     changelog commits, which are safe to discard — npm versions are immutable).
-  2. That push makes the Changesets action open a **"chore: version packages"**
-     PR that bumps the fixed `@open-wa/*` group and consumes the changesets.
-  3. Merging that version PR publishes to npm + GitHub Packages, tags, creates
-     the GitHub Release (which also deploys the docs), and notifies Discord.
-- The alpha train uses Changesets pre-mode (`.changeset/pre.json`, tag `alpha`).
-  Do not edit `pre.json` casually.
-- `tools/release/publish-packages-local.sh` is intentionally gitignored — it is
-  a local-only helper. Do not commit it.
+- Push development and bump files directly to `master`. Pushing there deploys affected
+  docs, but does not publish packages.
+- Put package bump intent in `.bumpy/*.md`; `.bumpy/_config.json` defines the
+  fixed package group and publication settings.
+- Post `/release` on an issue or run `gh workflow run comment-run.yml --ref master`.
+  The Prepare release workflow consumes the bump files, commits versions and
+  changelogs directly to `master`, and opens or reuses one `master` → `release` PR.
+- Merge that normal promotion PR to publish using npm trusted publishing,
+  publish GitHub Packages, and create the aggregate GitHub release. Versions
+  already live on `master`; do not create separate Bumpy version or sync PRs.
+  Preserve release-only history; do not force-push or bypass protections.
+- Preparation, package publishing, availability tracking, release notes, and
+  documentation deployment are separate actions. Publishing calls `bumpy publish`,
+  never the Bumpy version-PR path. Bumps arriving during promotion are consumed
+  directly and their versions are merged back to `master` without another PR.
+- Generate standard release notes from commit messages between aggregate tags.
+  Use plain section headings, an emoji per entry, an inline concern, commit links,
+  and related issue links. Keep concerns together and sort concerns and entries
+  newest first. Omit merge/version bookkeeping and deduplicate repeated changes.
+  Do not automatically generate AI copy, blog posts, CMS entries, or release images.
+  Significant editorial releases are authored directly with Mohammed.
+- New aggregate releases normally announce on Discord. If the authorized
+  release excludes announcements, include `[skip-discord]` in the release PR's
+  **merge commit message**. The release notes action posts one concise announcement
+  after npm availability and documentation deployment are confirmed. Save its
+  message ID in `release-state.json`; reruns edit that message. An announcement
+  failure does not republish packages.
+- Confirm registry versions and the workflow conclusion before reporting a
+  package as released. A merged development PR is not a published package.
+- npm can accept a version while its public manifest and tarball still return 404.
+  Track that validation in the availability action; do not reupload an accepted
+  version. Record manifest, dist-tag, tarball and docs deployment completion in
+  the aggregate release's `release-state.json` asset. Rerun the failed action for
+  that version independently, without opening another PR or publishing again.
+- Stable packages publish under npm's `latest` tag. Do not reintroduce
+  Changesets pre-mode.
+- `gh-signoff` can record checks Mohammed requested and actually ran. It does
+  not run checks itself. Do not install a required signoff ruleset or add a
+  release gate unless Mohammed explicitly asks for one.
+- `tools/release/publish-packages-local.sh` is intentionally gitignored and
+  local-only. Do not commit it.
 
 ## Repository Gotchas
 

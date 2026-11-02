@@ -9,68 +9,27 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as PortalRouteImport } from './routes/portal'
-import { Route as PlaygroundRouteImport } from './routes/playground'
-import { Route as McpRouteImport } from './routes/mcp'
-import { Route as IntegrationsRouteImport } from './routes/integrations'
-import { Route as HealthRouteImport } from './routes/health'
-import { Route as EventsRouteImport } from './routes/events'
-import { Route as DebugRouteImport } from './routes/debug'
-import { Route as ContactsRouteImport } from './routes/contacts'
-import { Route as ChatRouteImport } from './routes/chat'
-import { Route as AppsRouteImport } from './routes/apps'
-import { Route as ApiDocsRouteImport } from './routes/api-docs'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiDocsRouteImport } from './routes/api-docs'
+import { Route as AppsRouteImport } from './routes/apps'
+import { Route as CallsRouteImport } from './routes/calls'
+import { Route as ChatRouteImport } from './routes/chat'
+import { Route as ContactsRouteImport } from './routes/contacts'
+import { Route as DebugRouteImport } from './routes/debug'
+import { Route as EventsRouteImport } from './routes/events'
+import { Route as HealthRouteImport } from './routes/health'
+import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as McpRouteImport } from './routes/mcp'
+import { Route as PairingRouteImport } from './routes/pairing'
+import { Route as PlaygroundRouteImport } from './routes/playground'
+import { Route as PortalRouteImport } from './routes/portal'
 import { Route as PluginsNameRouteImport } from './routes/plugins.$name'
+import { Route as StudioMessagesRouteImport } from './routes/studio_.messages'
+import { Route as StudioStickersRouteImport } from './routes/studio_.stickers'
 
-const PortalRoute = PortalRouteImport.update({
-  id: '/portal',
-  path: '/portal',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PlaygroundRoute = PlaygroundRouteImport.update({
-  id: '/playground',
-  path: '/playground',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const McpRoute = McpRouteImport.update({
-  id: '/mcp',
-  path: '/mcp',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IntegrationsRoute = IntegrationsRouteImport.update({
-  id: '/integrations',
-  path: '/integrations',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const HealthRoute = HealthRouteImport.update({
-  id: '/health',
-  path: '/health',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const EventsRoute = EventsRouteImport.update({
-  id: '/events',
-  path: '/events',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DebugRoute = DebugRouteImport.update({
-  id: '/debug',
-  path: '/debug',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ContactsRoute = ContactsRouteImport.update({
-  id: '/contacts',
-  path: '/contacts',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ChatRoute = ChatRouteImport.update({
-  id: '/chat',
-  path: '/chat',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppsRoute = AppsRouteImport.update({
-  id: '/apps',
-  path: '/apps',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiDocsRoute = ApiDocsRouteImport.update({
@@ -78,9 +37,64 @@ const ApiDocsRoute = ApiDocsRouteImport.update({
   path: '/api-docs',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AppsRoute = AppsRouteImport.update({
+  id: '/apps',
+  path: '/apps',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CallsRoute = CallsRouteImport.update({
+  id: '/calls',
+  path: '/calls',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChatRoute = ChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ContactsRoute = ContactsRouteImport.update({
+  id: '/contacts',
+  path: '/contacts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DebugRoute = DebugRouteImport.update({
+  id: '/debug',
+  path: '/debug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EventsRoute = EventsRouteImport.update({
+  id: '/events',
+  path: '/events',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HealthRoute = HealthRouteImport.update({
+  id: '/health',
+  path: '/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IntegrationsRoute = IntegrationsRouteImport.update({
+  id: '/integrations',
+  path: '/integrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PairingRoute = PairingRouteImport.update({
+  id: '/pairing',
+  path: '/pairing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlaygroundRoute = PlaygroundRouteImport.update({
+  id: '/playground',
+  path: '/playground',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PortalRoute = PortalRouteImport.update({
+  id: '/portal',
+  path: '/portal',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PluginsNameRoute = PluginsNameRouteImport.update({
@@ -88,11 +102,22 @@ const PluginsNameRoute = PluginsNameRouteImport.update({
   path: '/plugins/$name',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StudioMessagesRoute = StudioMessagesRouteImport.update({
+  id: '/studio_/messages',
+  path: '/studio/messages',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StudioStickersRoute = StudioStickersRouteImport.update({
+  id: '/studio_/stickers',
+  path: '/studio/stickers',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api-docs': typeof ApiDocsRoute
   '/apps': typeof AppsRoute
+  '/calls': typeof CallsRoute
   '/chat': typeof ChatRoute
   '/contacts': typeof ContactsRoute
   '/debug': typeof DebugRoute
@@ -100,14 +125,18 @@ export interface FileRoutesByFullPath {
   '/health': typeof HealthRoute
   '/integrations': typeof IntegrationsRoute
   '/mcp': typeof McpRoute
+  '/pairing': typeof PairingRoute
   '/playground': typeof PlaygroundRoute
   '/portal': typeof PortalRoute
   '/plugins/$name': typeof PluginsNameRoute
+  '/studio/messages': typeof StudioMessagesRoute
+  '/studio/stickers': typeof StudioStickersRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api-docs': typeof ApiDocsRoute
   '/apps': typeof AppsRoute
+  '/calls': typeof CallsRoute
   '/chat': typeof ChatRoute
   '/contacts': typeof ContactsRoute
   '/debug': typeof DebugRoute
@@ -115,15 +144,19 @@ export interface FileRoutesByTo {
   '/health': typeof HealthRoute
   '/integrations': typeof IntegrationsRoute
   '/mcp': typeof McpRoute
+  '/pairing': typeof PairingRoute
   '/playground': typeof PlaygroundRoute
   '/portal': typeof PortalRoute
   '/plugins/$name': typeof PluginsNameRoute
+  '/studio/messages': typeof StudioMessagesRoute
+  '/studio/stickers': typeof StudioStickersRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/api-docs': typeof ApiDocsRoute
   '/apps': typeof AppsRoute
+  '/calls': typeof CallsRoute
   '/chat': typeof ChatRoute
   '/contacts': typeof ContactsRoute
   '/debug': typeof DebugRoute
@@ -131,9 +164,12 @@ export interface FileRoutesById {
   '/health': typeof HealthRoute
   '/integrations': typeof IntegrationsRoute
   '/mcp': typeof McpRoute
+  '/pairing': typeof PairingRoute
   '/playground': typeof PlaygroundRoute
   '/portal': typeof PortalRoute
   '/plugins/$name': typeof PluginsNameRoute
+  '/studio_/messages': typeof StudioMessagesRoute
+  '/studio_/stickers': typeof StudioStickersRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -141,6 +177,7 @@ export interface FileRouteTypes {
     | '/'
     | '/api-docs'
     | '/apps'
+    | '/calls'
     | '/chat'
     | '/contacts'
     | '/debug'
@@ -148,14 +185,18 @@ export interface FileRouteTypes {
     | '/health'
     | '/integrations'
     | '/mcp'
+    | '/pairing'
     | '/playground'
     | '/portal'
     | '/plugins/$name'
+    | '/studio/messages'
+    | '/studio/stickers'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/api-docs'
     | '/apps'
+    | '/calls'
     | '/chat'
     | '/contacts'
     | '/debug'
@@ -163,14 +204,18 @@ export interface FileRouteTypes {
     | '/health'
     | '/integrations'
     | '/mcp'
+    | '/pairing'
     | '/playground'
     | '/portal'
     | '/plugins/$name'
+    | '/studio/messages'
+    | '/studio/stickers'
   id:
     | '__root__'
     | '/'
     | '/api-docs'
     | '/apps'
+    | '/calls'
     | '/chat'
     | '/contacts'
     | '/debug'
@@ -178,15 +223,19 @@ export interface FileRouteTypes {
     | '/health'
     | '/integrations'
     | '/mcp'
+    | '/pairing'
     | '/playground'
     | '/portal'
     | '/plugins/$name'
+    | '/studio_/messages'
+    | '/studio_/stickers'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiDocsRoute: typeof ApiDocsRoute
   AppsRoute: typeof AppsRoute
+  CallsRoute: typeof CallsRoute
   ChatRoute: typeof ChatRoute
   ContactsRoute: typeof ContactsRoute
   DebugRoute: typeof DebugRoute
@@ -194,81 +243,21 @@ export interface RootRouteChildren {
   HealthRoute: typeof HealthRoute
   IntegrationsRoute: typeof IntegrationsRoute
   McpRoute: typeof McpRoute
+  PairingRoute: typeof PairingRoute
   PlaygroundRoute: typeof PlaygroundRoute
   PortalRoute: typeof PortalRoute
   PluginsNameRoute: typeof PluginsNameRoute
+  StudioMessagesRoute: typeof StudioMessagesRoute
+  StudioStickersRoute: typeof StudioStickersRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/portal': {
-      id: '/portal'
-      path: '/portal'
-      fullPath: '/portal'
-      preLoaderRoute: typeof PortalRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/playground': {
-      id: '/playground'
-      path: '/playground'
-      fullPath: '/playground'
-      preLoaderRoute: typeof PlaygroundRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mcp': {
-      id: '/mcp'
-      path: '/mcp'
-      fullPath: '/mcp'
-      preLoaderRoute: typeof McpRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/integrations': {
-      id: '/integrations'
-      path: '/integrations'
-      fullPath: '/integrations'
-      preLoaderRoute: typeof IntegrationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/health': {
-      id: '/health'
-      path: '/health'
-      fullPath: '/health'
-      preLoaderRoute: typeof HealthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/events': {
-      id: '/events'
-      path: '/events'
-      fullPath: '/events'
-      preLoaderRoute: typeof EventsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/debug': {
-      id: '/debug'
-      path: '/debug'
-      fullPath: '/debug'
-      preLoaderRoute: typeof DebugRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/contacts': {
-      id: '/contacts'
-      path: '/contacts'
-      fullPath: '/contacts'
-      preLoaderRoute: typeof ContactsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/chat': {
-      id: '/chat'
-      path: '/chat'
-      fullPath: '/chat'
-      preLoaderRoute: typeof ChatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/apps': {
-      id: '/apps'
-      path: '/apps'
-      fullPath: '/apps'
-      preLoaderRoute: typeof AppsRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api-docs': {
@@ -278,11 +267,88 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiDocsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/apps': {
+      id: '/apps'
+      path: '/apps'
+      fullPath: '/apps'
+      preLoaderRoute: typeof AppsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/calls': {
+      id: '/calls'
+      path: '/calls'
+      fullPath: '/calls'
+      preLoaderRoute: typeof CallsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat': {
+      id: '/chat'
+      path: '/chat'
+      fullPath: '/chat'
+      preLoaderRoute: typeof ChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/contacts': {
+      id: '/contacts'
+      path: '/contacts'
+      fullPath: '/contacts'
+      preLoaderRoute: typeof ContactsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/debug': {
+      id: '/debug'
+      path: '/debug'
+      fullPath: '/debug'
+      preLoaderRoute: typeof DebugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/events': {
+      id: '/events'
+      path: '/events'
+      fullPath: '/events'
+      preLoaderRoute: typeof EventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/health': {
+      id: '/health'
+      path: '/health'
+      fullPath: '/health'
+      preLoaderRoute: typeof HealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/integrations': {
+      id: '/integrations'
+      path: '/integrations'
+      fullPath: '/integrations'
+      preLoaderRoute: typeof IntegrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pairing': {
+      id: '/pairing'
+      path: '/pairing'
+      fullPath: '/pairing'
+      preLoaderRoute: typeof PairingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/playground': {
+      id: '/playground'
+      path: '/playground'
+      fullPath: '/playground'
+      preLoaderRoute: typeof PlaygroundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/portal': {
+      id: '/portal'
+      path: '/portal'
+      fullPath: '/portal'
+      preLoaderRoute: typeof PortalRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/plugins/$name': {
@@ -292,6 +358,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PluginsNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/studio_/messages': {
+      id: '/studio_/messages'
+      path: '/studio/messages'
+      fullPath: '/studio/messages'
+      preLoaderRoute: typeof StudioMessagesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/studio_/stickers': {
+      id: '/studio_/stickers'
+      path: '/studio/stickers'
+      fullPath: '/studio/stickers'
+      preLoaderRoute: typeof StudioStickersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -299,6 +379,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiDocsRoute: ApiDocsRoute,
   AppsRoute: AppsRoute,
+  CallsRoute: CallsRoute,
   ChatRoute: ChatRoute,
   ContactsRoute: ContactsRoute,
   DebugRoute: DebugRoute,
@@ -306,9 +387,12 @@ const rootRouteChildren: RootRouteChildren = {
   HealthRoute: HealthRoute,
   IntegrationsRoute: IntegrationsRoute,
   McpRoute: McpRoute,
+  PairingRoute: PairingRoute,
   PlaygroundRoute: PlaygroundRoute,
   PortalRoute: PortalRoute,
   PluginsNameRoute: PluginsNameRoute,
+  StudioMessagesRoute: StudioMessagesRoute,
+  StudioStickersRoute: StudioStickersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

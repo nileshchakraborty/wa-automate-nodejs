@@ -1,12 +1,13 @@
 {
   "name": "@open-wa/client",
-  "version": "5.0.0-alpha.7",
+  "version": "5.10.0",
   "description": "User-facing API client for open-wa WhatsApp automation",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "exports": {
     ".": {
+      "bun": "./src/index.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs",
       "types": "./dist/index.d.mts"
@@ -16,6 +17,7 @@
     "build": "tsdown src/index.ts --format esm --format cjs",
     "dev": "tsdown src/index.ts --format esm --format cjs --watch",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "clean": "rimraf dist"
   },
@@ -25,8 +27,11 @@
     "@open-wa/domain": "workspace:*",
     "@open-wa/hyperemitter": "workspace:*",
     "@open-wa/logger": "workspace:*",
+    "@open-wa/runtime-core": "workspace:*",
     "@open-wa/schema": "workspace:*",
-    "axios": "catalog:"
+    "axios": "catalog:",
+    "effect": "catalog:",
+    "@open-wa/stickers": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
@@ -34,11 +39,22 @@
     "vitest": "catalog:"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      ".": {
+        "import": "./dist/index.mjs",
+        "require": "./dist/index.cjs",
+        "types": "./dist/index.d.mts"
+      }
+    }
   },
   "type": "module",
   "repository": {
     "type": "git",
     "url": "https://github.com/open-wa/wa-automate-nodejs.git"
-  }
+  },
+  "license": "SEE LICENSE IN LICENSE.md",
+  "files": [
+    "dist"
+  ]
 }

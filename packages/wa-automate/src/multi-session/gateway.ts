@@ -35,9 +35,15 @@ export interface SessionGatewayOptions {
   legacyApiKey?: string;
 }
 
+function normalizeKey(key: string): string {
+  return key.trim().replace(/\\n$/, '').trim();
+}
+
 function apiKeysMatch(candidate: string, expected: string): boolean {
-  const candidateBuffer = Buffer.from(candidate, 'utf8');
-  const expectedBuffer = Buffer.from(expected, 'utf8');
+  const normCandidate = normalizeKey(candidate);
+  const normExpected = normalizeKey(expected);
+  const candidateBuffer = Buffer.from(normCandidate, 'utf8');
+  const expectedBuffer = Buffer.from(normExpected, 'utf8');
   return candidateBuffer.length === expectedBuffer.length
     && timingSafeEqual(candidateBuffer, expectedBuffer);
 }

@@ -1,150 +1,89 @@
 ---
 title: Quick start
-description: Start the Easy API, connect WhatsApp, open the docs, and send a test message.
+description: Generate an open-wa project, link WhatsApp, and send your first message.
 ---
 
 # Quick start
 
-Follow these steps to start a local API, connect a WhatsApp account, and send one test message.
+## Before you start
 
-## Prerequisites
+Use **Node.js 22.21.1 or newer**, npm, and a phone running WhatsApp.
 
-- **Node.js >= 22.21.1**, this is required. The library will not work on older versions. Check with `node --version`.
-- **npm or pnpm**, any package manager works, but pnpm is used for repo development.
-- **A WhatsApp account** on a linked phone, this automates WhatsApp Web, not the mobile app.
-
-<Callout type="warning">
-**v5 is alpha.** Test in a disposable environment before using in production. For production systems, use v4: `npx @open-wa/wa-automate@4.76.0`
-</Callout>
-
-<Steps>
-<Step title="Start the Easy API">
-
-Run the CLI to start a local WhatsApp API:
+## 1. Create your project
 
 ```bash
-npx @open-wa/wa-automate --port 8080
+npm init @open-wa@latest my-bot
+cd my-bot
 ```
 
-These examples pin port `8080` for consistency. If you omit `--port`, the current v5 CLI uses port `8002`.
+Choose **Easy API** to use HTTP requests and the Neo dashboard, or **SDK** to
+write your own bot. The wizard also lets you choose JavaScript or TypeScript,
+use installed Chrome or download a browser, and select plugins.
 
-You should see terminal output showing:
+Prefer a visual setup? Use the [project builder](/new) to choose your options,
+preview the files, and copy a complete setup command. See the
+[initializer guide](/docs/getting-started/initializer) for all flags.
 
-- The browser launching
-- A QR code appearing in the terminal
-- The local API address (usually `http://localhost:8080`)
+If you selected integrations, copy `.env.example` to `.env` and fill in their
+settings. Selected plugins and any needed browser download are installed at
+startup and cached for reuse.
 
-</Step>
-<Step title="Authenticate">
-
-The runtime will display a QR code in your terminal. Open WhatsApp on your phone:
-
-1. Tap **Menu** or **Settings**
-2. Tap **Linked Devices**
-3. Tap **Link a Device**
-4. Scan the QR code in your terminal
-
-Alternatively, if you know the host account number, use **[Link-code login](/docs/getting-started/link-code)** to avoid QR scanning.
-
-Once authenticated, the terminal will show the session is connected and the API is ready.
-
-</Step>
-<Step title="Verify the API is running">
-
-Open your browser to:
-
-```text
-http://localhost:8080/api-docs/
-```
-
-This is the interactive API documentation for your live session. If this page loads, your session is up, the API is reachable, and you can discover all available methods.
-
-Other useful endpoints:
-
-- `http://localhost:8080/meta/swagger.json`, OpenAPI schema
-- `http://localhost:8080/meta/postman.json`, Postman collection
-
-</Step>
-<Step title="Send your first message">
-
-<Tabs items={['API docs UI', 'curl']}>
-<Tab value="API docs UI">
-
-1. Open `http://localhost:8080/api-docs/`
-2. Find the `sendText` method
-3. Enter a chat ID (your own number in format `1234567890@c.us`)
-4. Enter a message body
-5. Execute the request
-
-</Tab>
-<Tab value="curl">
+## 2. Start and link WhatsApp
 
 ```bash
-curl -X POST http://localhost:8080/api/sendText \
-  -H "Content-Type: application/json" \
-  -d '{"to": "1234567890@c.us", "text": "Hello from open-wa!"}'
+npm start
 ```
 
-If you started the API with `--api-key "your-secure-key"`, include it in the header:
+On your phone, open **WhatsApp → Linked devices → Link a device** and scan the QR
+code shown in the terminal. Keep the terminal open; stop the project with
+`Ctrl+C`. Restart from the same project directory to reuse a valid saved login.
+
+## 3. Use your project
+
+### Easy API
+
+Open [Neo](http://127.0.0.1:8080/dashboard/) to manage the session and
+[the API explorer](http://127.0.0.1:8080/api-docs/) to browse available requests.
+The HTTP process can start before WhatsApp connects. Check readiness before
+sending:
 
 ```bash
-curl -X POST http://localhost:8080/api/sendText \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secure-key" \
-  -d '{"to": "1234567890@c.us", "text": "Hello from open-wa!"}'
+curl http://127.0.0.1:8080/health
 ```
 
-You should receive the message on your phone within seconds.
+Look for `connected: true` and `session.ready: true`. If either is false, finish
+pairing and inspect the reported pending steps before sending.
 
-Expected API result, illustrative and abbreviated. The Easy API wraps method results in `data`; for `sendText`, that value is the sent message id string:
-
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{
-  "success": true,
-  "data": "true_1234567890@c.us_EXAMPLE"
-}
-```
-
-Auth failure result, illustrative and abbreviated:
-
-```http
-HTTP/1.1 401 Unauthorized
-Content-Type: application/json
-
-{
-  "error": "Unauthorized"
-}
-```
-
-If the API is protected and the key is missing or wrong, expect an authentication error instead of a message send. Add the same `X-API-Key` value that you used when starting the runtime, then retry the request. Once the send succeeds, keep the API key on every client request and move to the guide that matches your next use case below.
-
-</Tab>
-</Tabs>
-
-</Step>
-</Steps>
-
-## Where next?
-
-- **I want to build a bot** → Read **[Messages and events](/docs/guides/messages)**
-- **I want to connect my CRM** → Read **[Chatwoot integration](/docs/client-and-integrations/chatwoot)**
-- **I want AI agents to access WhatsApp** → Read **[MCP integration](/docs/guides/mcp)**
-- **I want to build a plugin** → Read **[Plugin getting started](/docs/plugins/getting-started)**
-- **I want to deploy to production** → Read **[Security & deployment](/docs/operations/security-and-deployment)**
-- **I want to write custom code** → Read **[Custom code](/docs/getting-started/custom-code)**
-
-## Common next commands
+Use an existing conversation whose recipient expects your message. Replace
+the example chat ID, then run this in another terminal:
 
 ```bash
-# Protect with an API key
-npx @open-wa/wa-automate --port 8080 --api-key "your-secure-key"
-
-# Run a named session
-npx @open-wa/wa-automate --session-id sales --port 8081
-
-# For source-backed webhook delivery in the current v5 alpha,
-# load @open-wa/integration-webhook from wa.config.* instead of relying on --webhook.
+curl --fail-with-body http://127.0.0.1:8080/api/messages/sendText \
+  -H 'Content-Type: application/json' \
+  --data '{"to":"447700900123@c.us","content":"Hello from open-wa","options":{}}'
 ```
+
+If you set `WA_API_KEY`, also send an `X-API-Key` header with that value. A
+successful response returns the submitted message ID; check the receiving chat
+for delivery. In PowerShell, use `curl.exe` for these curl commands.
+
+Continue with the [Easy API guide](/docs/getting-started/easy-api) for HTTP
+authentication, events, and media.
+
+### SDK
+
+The generated `index.js` or `index.ts` connects and keeps the bot running.
+Send `!ping` to the linked account from another account; it replies `pong`.
+Edit that file to add your own handlers. The generated config is imported and
+passed to `create()` explicitly.
+
+Continue with the [SDK guide](/docs/getting-started/custom-code).
+
+### Voxtral
+
+If you selected Voxtral, set `MISTRAL_API_KEY` in `.env` before starting. It
+answers voice notes, calls, or both according to your selection. Set `JEV_API_KEY`
+to enable chat actions such as booking cards and buttons. Calls also
+need `OPENWA_LICENSE_KEY` with calling enabled. In Easy API, use **Plugins →
+Voxtral** for settings and a person's normal **Chat** view for transcripts and
+controls. See the [Voxtral guide](/docs/guides/voxtral).

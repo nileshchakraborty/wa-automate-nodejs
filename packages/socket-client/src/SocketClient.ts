@@ -1,7 +1,12 @@
-import { EventEmitter2 } from 'eventemitter2';
+import { EventEmitter } from '@open-wa/hyperemitter';
+import { Effect } from 'effect';
 import { EventSource as EventSourcePolyfill } from 'eventsource';
 import type { SimpleListener, Chat, ChatId, Message } from "@open-wa/wa-automate-types-only";
 import type { BaseClient as _Client } from "@open-wa/wa-automate-types-only";
+import { RemoteCalls } from './calling';
+import type { SessionRefreshOptions, SessionRefreshResult, SessionRefreshSnapshot } from '@open-wa/schema';
+import { normalizeCallMedia } from '@open-wa/schema/calling-media';
+import type { Call, CallSnapshot, CallCapabilities, CallActionResult, CallMediaOptions, AudioInput, AudioOutput, VideoInput } from '@open-wa/schema';
 import { TunnelSocketClient } from './TunnelSocketClient';
 const uuidv4 = () => typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 import { MessageCollector } from './MessageCollector';
@@ -20,6 +25,9 @@ type SseEventEnvelope = {
 type SocketLikeListener = (...args: any[]) => void;
 
 const DEFAULT_STREAM_EVENTS = [
+    'session.refresh.progress',
+    'call.incoming',
+    'call.state',
     'message.received',
     'message.any',
     'ack.changed',
@@ -27,6 +35,7 @@ const DEFAULT_STREAM_EVENTS = [
     'group.addedToGroup',
     'launch.auth.qr.generated',
     'launch.auth.qr.scanned',
+    'launch.auth.qr.expired',
     'patch.apply.after',
     'client.ready',
     'internal_launch_progress',
@@ -76,8 +85,7 @@ class SocketCompat {
     public connected = false;
     public id = `sse-${uuidv4()}`;
 
-    private emitter = new EventEmitter2();
-    private anyListeners = new Set<(event: string, ...args: any[]) => void>();
+    private emitter = new EventEmitter();
 
     constructor(private readonly client: SocketClient) { }
 
@@ -93,12 +101,12 @@ class SocketCompat {
     }
 
     public onAny(listener: (event: string, ...args: any[]) => void) {
-        this.anyListeners.add(listener);
+        this.emitter.onAny(listener);
         return this;
     }
 
     public offAny(listener: (event: string, ...args: any[]) => void) {
-        this.anyListeners.delete(listener);
+        this.emitter.offAny(listener);
         return this;
     }
 
@@ -138,9 +146,14 @@ class SocketCompat {
 
     public emitLocal(event: string, ...args: any[]) {
         this.emitter.emit(event, ...args);
-        for (const listener of this.anyListeners) {
-            listener(event, ...args);
-        }
+    }
+
+    public closeEvents() {
+        void Effect.runPromise(this.emitter.close());
+    }
+
+    public openEvents() {
+        if (this.emitter.isClosed) this.emitter = new EventEmitter();
     }
 }
 
@@ -203,17 +216,19 @@ export class SocketClient {
     socket: SocketCompat;
     flushListenersOnDisconnect: boolean = true;
     /**
-     * A local version of the `ev` EventEmitter2
+     * A local HyperEmitter for remote events and Effect-scoped subscriptions.
      */
-    ev: EventEmitter2 = new EventEmitter2({
-        wildcard: true
-    })
+    ev: EventEmitter = new EventEmitter();
     listeners: {
         [listener in SimpleListener]?: {
             [id: string]: (data: any) => any
         }
     } = {};
 
+    private readonly calls: RemoteCalls;
+    private incomingCalls = new Map<string, (call: Call) => unknown>();
+    private callStates = new Map<string, (call: Call) => unknown>();
+    private callingWarnings = new Set<string>();
     private stream: any = null;
     private streamOpenPromise: Promise<void> | null = null;
     private resolveStreamOpen: (() => void) | null = null;
@@ -250,9 +265,6 @@ export class SocketClient {
 
     private async _connected() {
         debug("_connected", this.socket.id)
-        if (!this.ev) this.ev = new EventEmitter2({
-            wildcard: true
-        })
         if (!this.hasSignalHandler && typeof process !== 'undefined' && process.on) {
             process.on('SIGINT', () => {
                 this.close()
@@ -267,6 +279,7 @@ export class SocketClient {
      * Disconnect the socket
      */
     public disconnect(): void {
+        void this.calls.close();
         this.closeStream('client disconnect');
     }
 
@@ -274,7 +287,10 @@ export class SocketClient {
      * Close the socket. Prevents not being able to close the node process.
      */
     public close(): void {
+        void this.calls.close();
         this.closeStream('client close');
+        void Effect.runPromise(this.ev.close());
+        this.socket.closeEvents();
     }
 
     /**
@@ -289,8 +305,35 @@ export class SocketClient {
      * Reconnect the socket
      */
     public async reconnect(): Promise<void> {
+        if (this.ev.isClosed) this.ev = new EventEmitter();
+        this.socket.openEvents();
         this.closeStream('manual reconnect', false);
         await this.openStream();
+    }
+
+    public async requestRefresh(options: SessionRefreshOptions = {}): Promise<{ operationId: string }> {
+        return this.refreshControl('POST', options);
+    }
+    public async getRefreshStatus(): Promise<SessionRefreshSnapshot> { return this.refreshControl('GET'); }
+    public async refresh(options: SessionRefreshOptions = {}): Promise<SessionRefreshResult> {
+        const { operationId } = await this.requestRefresh(options);
+        while (!this.isClosed) {
+            const snapshot = await this.getRefreshStatus();
+            if (snapshot.operationId !== operationId) throw new Error('The refresh operation was superseded. Read the current session status.');
+            if (!snapshot.running || snapshot.phase === 'needs_auth') return snapshot;
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+        throw new Error('The client disconnected. The accepted refresh continues on the server.');
+    }
+    private async refreshControl<T>(method: 'GET' | 'POST', options?: SessionRefreshOptions): Promise<T> {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (this.apiKey) headers['X-API-Key'] = this.apiKey;
+        const response = await fetch(`${this.getBaseUrl()}/api/session/refresh`, {
+            method, headers, ...(method === 'POST' ? { body: JSON.stringify(options ?? {}) } : {}),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result?.error || `Session control returned HTTP ${response.status}`);
+        return result as T;
     }
 
     public async createMessageCollector(c: Message | ChatId | Chat, filter: CollectorFilter<[Message]>, options: CollectorOptions): Promise<MessageCollector> {
@@ -324,6 +367,7 @@ export class SocketClient {
         this.apiKey = apiKey ?? '';
         this.flushListenersOnDisconnect = flushListenersOnDisconnect ?? this.flushListenersOnDisconnect;
         this.socket = new SocketCompat(this);
+        this.calls = new RemoteCalls(this.getBaseUrl(), this.apiKey, (method, args) => this.ask(method as any, args));
         void this.openStream();
         return new Proxy(this, {
             get: function get(target: SocketClient, prop: string) {
@@ -394,6 +438,7 @@ export class SocketClient {
                 const wasConnected = this.socket.connected;
                 this.socket.connected = false;
                 if (wasConnected) {
+                    void this.calls.close();
                     this.socket.emitLocal('disconnect', 'eventsource error');
                 }
                 if (!this.hasOpenedStream) {
@@ -455,6 +500,15 @@ export class SocketClient {
         const resolvedEventName = envelope?.event || eventName;
         const payload = envelope && 'payload' in envelope ? envelope.payload : envelope ?? (event as any).data;
         debug('stream event', resolvedEventName);
+        if (resolvedEventName === 'call.incoming' || resolvedEventName === 'call.state') {
+            const snapshot = (payload as any)?.call ?? (payload as any)?.state;
+            if (snapshot?.id && snapshot?.generation) {
+                this.calls.observe(snapshot);
+                const call = this.calls.hydrate(snapshot);
+                const callbacks = resolvedEventName === 'call.incoming' ? this.incomingCalls : this.callStates;
+                for (const callback of callbacks.values()) void Promise.resolve().then(() => callback(call)).catch(error => this.socket.emitLocal('call:error', error));
+            }
+        }
 
         for (const dispatchEventName of getDispatchEventNames(resolvedEventName)) {
             this.ev.emit(dispatchEventName, payload);
@@ -491,6 +545,7 @@ export class SocketClient {
             this.socket.emitLocal('disconnect', reason);
         }
 
+        void this.calls.close();
         if (this.flushListenersOnDisconnect) {
             void this.flushListeners();
         }
@@ -525,10 +580,32 @@ export class SocketClient {
     //   [K in keyof Parameters<Pick<Client,M>[ M ]>]: Parameters<Pick<Client,M>[ M ]>[K]
     // }
 
+    public async getCallCapabilities(): Promise<CallCapabilities> { return this.ask('getCallCapabilities' as any) as Promise<CallCapabilities>; }
+    public async getLicenseFeatures(): Promise<import('@open-wa/schema').LicenseFeatures> { return this.ask('getLicenseFeatures' as any) as Promise<import('@open-wa/schema').LicenseFeatures>; }
+    public async getActiveCall(): Promise<Call | null> { const snapshot = await this.ask('getActiveCall' as any) as CallSnapshot | null; return snapshot ? this.calls.hydrate(snapshot) : null; }
+    private async logCallingAvailability() {
+        const capabilities = await this.getCallCapabilities();
+        if (capabilities.reason && !this.callingWarnings.has(capabilities.reason.code)) {
+            this.callingWarnings.add(capabilities.reason.code);
+            console.warn(capabilities.reason.message);
+        }
+    }
+    public async onIncomingCall(callback: (call: Call) => unknown): Promise<string> {
+        const id = uuidv4(); this.incomingCalls.set(id, callback);
+        void this.logCallingAvailability().catch(error => this.socket.emitLocal('call:error', error));
+        return id;
+    }
+    public async onCallState(callback: (call: Call) => unknown): Promise<string> {
+        const id = uuidv4(); this.callStates.set(id, callback);
+        void this.logCallingAvailability().catch(error => this.socket.emitLocal('call:error', error));
+        return id;
+    }
+    public async startCall(to: string, microphone?: AudioInput | CallMediaOptions, speaker?: AudioOutput, camera?: VideoInput): Promise<CallActionResult> { return this.calls.start(to, normalizeCallMedia(microphone, speaker, camera)); }
+
     public async ask<M extends ClientMethods, P extends Parameters<Pick<Client, M>[M]>>(method: M, args?: any[] | P | {
         [k: string]: unknown
     }): Promise<unknown> {
-        debug("ask", method, args)
+        debug("ask", method)
         if (typeof args !== "object" && !Array.isArray(args) && (typeof args === "string" || typeof args === "number")) args = [args] as any
 
         const headers: Record<string, string> = {
@@ -558,7 +635,7 @@ export class SocketClient {
             parsed = undefined;
         }
 
-        debug("resolve", method, parsed)
+        debug("resolve", method)
 
         if (parsed && typeof parsed === "object" && "success" in parsed) {
             if (parsed.success) {
@@ -600,6 +677,8 @@ export class SocketClient {
      */
     public stopListener(listener: SimpleListener, callbackId: string): boolean {
         debug("stop listener", callbackId)
+        if (String(listener) === 'onIncomingCall') return this.incomingCalls.delete(callbackId);
+        if (String(listener) === 'onCallState') return this.callStates.delete(callbackId);
         if (this.listeners[listener]?.[callbackId]) {
             delete this.listeners[listener][callbackId];
             return true

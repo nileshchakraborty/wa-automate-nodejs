@@ -1,5 +1,5 @@
 import { IBrowser, IPage, DriverCapabilities } from '@open-wa/driver-interface';
-import type { Browser } from 'puppeteer';
+import type { Browser } from 'puppeteer-core';
 import { PuppeteerPage } from './PuppeteerPage';
 
 export class PuppeteerBrowser implements IBrowser {
@@ -33,11 +33,15 @@ export class PuppeteerBrowser implements IBrowser {
     }
 
     isConnected(): boolean {
-        return this.browser.isConnected();
+        return this.browser.connected;
     }
 
     async versionString(): Promise<string> {
         return await this.browser.version();
+    }
+
+    processId(): number | undefined {
+        return this.browser.process()?.pid;
     }
 
     unwrap(): Browser {

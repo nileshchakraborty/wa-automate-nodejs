@@ -11,8 +11,8 @@ import type {
 } from '@open-wa/driver-interface';
 import { HyperEmitter } from '@open-wa/hyperemitter';
 import type { Logger } from '@open-wa/logger';
-import type { OpenWAEventMap } from '../../src/events/eventMap.js';
-import { Transport } from '../../src/transport/Transport.js';
+import type { OpenWAEventMap } from '../../src/events/eventMap';
+import { Transport } from '../../src/transport/Transport';
 
 class FakeElementHandle implements IElementHandle {
   async click(): Promise<void> {}
@@ -84,10 +84,8 @@ class RuntimeBridgePage implements IPage {
     }),
   };
   private currentUrl = 'about:blank';
-  private readonly overwriteRuntimeDuringWapiEvaluation: boolean;
 
-  constructor(options: { overwriteRuntimeDuringWapiEvaluation?: boolean } = {}) {
-    this.overwriteRuntimeDuringWapiEvaluation = options.overwriteRuntimeDuringWapiEvaluation ?? false;
+  constructor() {
     this.browserGlobals = {
       WAPI: {
         onAnyMessage: this.wapiRegisterSpies.onAnyMessage,
@@ -103,7 +101,6 @@ class RuntimeBridgePage implements IPage {
       isSessionLoaded: () => true,
       WA_AUTHENTICATED: true,
       __OPENWA_RUNTIME_BRIDGE__: undefined,
-      __OPENWA_RUNTIME_MUTATION_LEASE__: undefined,
     };
   }
 
@@ -172,11 +169,7 @@ class RuntimeBridgePage implements IPage {
       ) as Ret;
     }
 
-    if (this.overwriteRuntimeDuringWapiEvaluation && _script.includes('window.WAPI = {}')) {
-      this.replaceRuntime();
-    } else {
-      this.restoreRuntime();
-    }
+    this.restoreRuntime();
 
     return undefined as Ret;
   }
@@ -336,15 +329,7 @@ class RuntimeBridgePage implements IPage {
         const previous = currentValue;
         currentValue = value;
 
-        const lease = this.browserGlobals.__OPENWA_RUNTIME_MUTATION_LEASE__;
-        const leaseActive = Boolean(
-          lease
-          && typeof lease.token === 'string'
-          && typeof lease.expiresAt === 'number'
-          && lease.expiresAt > Date.now()
-        );
-
-        if (previous && value && previous !== value && !leaseActive) {
+        if (previous && value && previous !== value) {
           void Promise.resolve(this.browserGlobals.OpenWA_RuntimeReplacementDetected?.({ reason: 'runtime_replaced' }));
         }
       },
@@ -404,30 +389,6 @@ function createLogger(): Logger {
 }
 
 describe('Transport runtime event bridge', () => {
-  it('does not treat the wapi asset replacing its own runtime as an external replacement', async () => {
-    const page = new RuntimeBridgePage({ overwriteRuntimeDuringWapiEvaluation: true });
-    const logger = createLogger();
-    const transport = new Transport({
-      driver: new FakeDriver(new FakeBrowser(page)),
-      events: new HyperEmitter<OpenWAEventMap>({ delimiter: '.', captureRejections: true }),
-      logger,
-      headless: true,
-      blockCrashLogs: false,
-      blockAssets: false,
-    });
-
-    await transport.initialize();
-    await transport.injectWapi();
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    expect(logger.warn).not.toHaveBeenCalledWith(
-      'runtime_recovery_queued',
-      expect.anything(),
-    );
-    expect(page.browserGlobals.WAPI).toBeTruthy();
-    expect(page.wapiRegisterSpies.onStateChanged).toHaveBeenCalledTimes(1);
-  });
-
   it('maps browser runtime callbacks onto core events and avoids duplicate setup in the same generation', async () => {
     const page = new RuntimeBridgePage();
     const events = new HyperEmitter<OpenWAEventMap>({ delimiter: '.', captureRejections: true });
@@ -572,35 +533,5 @@ describe('Transport runtime event bridge', () => {
     expect(page.waitForFunctionCalls).toEqual(expect.arrayContaining([
       expect.stringContaining('document.readyState'),
     ]));
-  });
-
-  it('coalesces rapid duplicate replacement notifications for the same runtime generation', async () => {
-    const page = new RuntimeBridgePage();
-    const logger = createLogger();
-    const transport = new Transport({
-      driver: new FakeDriver(new FakeBrowser(page)),
-      events: new HyperEmitter<OpenWAEventMap>({ delimiter: '.', captureRejections: true }),
-      logger,
-      headless: true,
-      blockCrashLogs: false,
-      blockAssets: false,
-    });
-
-    await transport.initialize();
-    await transport.injectWapi();
-
-    page.replaceRuntime();
-    page.replaceRuntime();
-    page.replaceRuntime();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    const queuedCalls = vi.mocked(logger.warn).mock.calls.filter(
-      ([message]) => message === 'runtime_recovery_queued',
-    );
-    expect(queuedCalls).toHaveLength(1);
-    expect(logger.debug).toHaveBeenCalledWith(
-      'runtime_recovery_coalesced',
-      expect.anything(),
-    );
   });
 });

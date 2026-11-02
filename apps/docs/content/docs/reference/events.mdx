@@ -3,9 +3,21 @@ title: Event Reference
 description: API reference for all events emitted by the Open-WA Client.
 ---
 
+[Browse the generated wire-event contracts](/docs/reference/event-contracts) or
+[download AsyncAPI 3.1](/asyncapi.json) for SSE, webhooks and MCP Events.
+
 # Event Reference
 
-Open-WA uses a centralized event system based on `HyperEmitter`. You can listen to these events to react to WhatsApp messages, connection state changes, and internal runtime lifecycle steps.
+Each open-wa client has its own `HyperEmitter` event stream. The shared `ev`
+helper forwards native events from those clients and supports v4 wildcard
+subscriptions through the Effect-backed HyperEmitter hybrid. Effect owns each
+forwarding connection and removes it when the session closes.
+
+The Effect hybrid and optional PubSub APIs are available from OpenWA 5.6.0.
+See [session events](/docs/guides/session-events) for aliases and payloads,
+the [HyperEmitter reference](/docs/reference/hyperemitter) for emitter methods,
+and [Consume events with Effect](/docs/guides/effect-event-streams) for a
+complete callback-and-queue example.
 
 ## Listener examples
 
@@ -42,7 +54,7 @@ Use client-level helpers, such as `client.onMessage`, for normal bot behavior af
 The shared emitter supports wildcard listeners. This is useful for debugging or for carefully redacted audit sinks. Some compatibility and session-level emitters also pass session data through wildcard segments:
 
 ```ts
-ev.on('**.**', (payload, sessionId, namespace) => {
+ev.on('**', (payload, sessionId, namespace) => {
   auditEvent({
     namespace,
     sessionId,
@@ -89,8 +101,9 @@ The table below lists every event name in `OpenWAEventMap` with its namespace. E
 | `session.frame` | `session.frame.navigated` |
 | `session.reinject` | `session.reinject.detected`, `session.reinject.before`, `session.reinject.after`, `session.reinject.qr.waiting` |
 | `session.stale` | `session.stale.detected` |
-| `session` | `session.logout` |
+| `session` | `session.logout`, `session.data` |
 | `message` | `message.received`, `message.any`, `message.deleted` |
+| `event` | `event.changed`, `event.response` |
 | `ack` | `ack.changed` |
 | `group` | `group.addedToGroup`, `group.removedFromGroup`, `group.participants.changed.global`, `group.approval.request`, `group.changed` |
 | `chat` | `chat.deleted`, `chat.opened`, `chat.state` |
@@ -220,7 +233,7 @@ A normal first login usually follows this order:
 22. `client.ready`
 23. `core.started`
 
-Warm starts can skip QR events. Failed starts may emit retry, timeout, invalid session, or error events before the lifecycle reaches `client.ready`.
+Warm starts can skip QR events. Failed starts can emit retry, timeout, invalid session, or error events before the lifecycle reaches `client.ready`.
 
 ## Mapping to session-events guide
 

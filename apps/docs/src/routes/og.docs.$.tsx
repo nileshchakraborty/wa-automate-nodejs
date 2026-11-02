@@ -21,7 +21,6 @@ async function getRenderer() {
 }
 
 export const Route = createFileRoute('/og/docs/$')({
-  // @ts-expect-error TanStack types mismatch
   server: {
     handlers: {
       async GET({
@@ -48,7 +47,7 @@ export const Route = createFileRoute('/og/docs/$')({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: '#f7f1df',
+              background: '#eef4fd',
               padding: 56,
               fontFamily: 'Geist',
             }}
@@ -61,10 +60,10 @@ export const Route = createFileRoute('/og/docs/$')({
                 gap: 44,
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                border: '4px solid #211a14',
+                border: '4px solid #1839b9',
                 borderRadius: 44,
-                background: '#fffaf0',
-                boxShadow: '14px 14px 0 #211a14',
+                background: '#f9fcff',
+                boxShadow: '14px 14px 0 #1839b9',
                 padding: 56,
               }}
             >
@@ -81,11 +80,11 @@ export const Route = createFileRoute('/og/docs/$')({
                   style={{
                     display: 'flex',
                     alignSelf: 'flex-start',
-                    border: '3px solid #211a14',
+                    border: '3px solid #1839b9',
                     borderRadius: 999,
-                    background: '#f2d06b',
+                    background: '#dde6f3',
                     padding: '12px 22px',
-                    color: '#211a14',
+                    color: '#162748',
                     fontSize: 26,
                     fontWeight: 800,
                     letterSpacing: 1.2,
@@ -95,7 +94,7 @@ export const Route = createFileRoute('/og/docs/$')({
                 </div>
                 <div
                   style={{
-                    color: '#211a14',
+                    color: '#162748',
                     fontSize: 72,
                     fontWeight: 900,
                     lineHeight: 0.95,
@@ -107,7 +106,7 @@ export const Route = createFileRoute('/og/docs/$')({
                 {description ? (
                   <div
                     style={{
-                      color: '#5f5044',
+                      color: '#49617f',
                       fontSize: 34,
                       fontWeight: 650,
                       lineHeight: 1.25,
@@ -127,10 +126,10 @@ export const Route = createFileRoute('/og/docs/$')({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    border: '4px solid #211a14',
+                    border: '4px solid #1839b9',
                     borderRadius: 999,
-                    background: '#f7f1df',
-                    color: '#211a14',
+                    background: '#eef4fd',
+                    color: '#162748',
                     fontSize: 96,
                     fontWeight: 950,
                     letterSpacing: -4,

@@ -1,9 +1,11 @@
 {
   "title": "Getting Started",
   "icon": "Rocket",
-  "defaultOpen": true,
+  "defaultOpen": false,
   "pages": [
     "quickstart",
+    "migrating-to-v5",
+    "initializer",
     "link-code",
     "easy-api",
     "custom-code",

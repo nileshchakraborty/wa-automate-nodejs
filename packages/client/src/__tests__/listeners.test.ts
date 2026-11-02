@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { HyperEmitter } from '@open-wa/hyperemitter';
-import { Client } from '../Client.js';
+import { Client } from '../Client';
 import type { OpenWAClient, OpenWAEventMap, STATE, Transport } from '@open-wa/core';
 
 function createTestClient() {
@@ -11,7 +11,7 @@ function createTestClient() {
     events,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
     session: {} as any,
-    plugins: {} as any,
+    plugins: { bindRuntime: vi.fn() } as any,
     config: {},
     registerFinalizationHook: vi.fn(() => () => undefined),
     start: vi.fn(),
@@ -24,6 +24,11 @@ function createTestClient() {
   };
 
   const transport: Transport = {
+    setPortableMessageHandler: vi.fn((handler) => {
+      const listener = ({ message }: any) => handler(message);
+      events.on('message.received', listener);
+      return () => events.off('message.received', listener);
+    }),
     evaluate: vi.fn(),
   } as any;
 
@@ -74,7 +79,7 @@ describe('Client listeners', () => {
     expect(handle.active).toBe(false);
   });
 
-  it('onAck transforms ack payload into the legacy-friendly shape', async () => {
+  it('onAck forwards the complete available ACK snapshot', async () => {
     const { client, events } = createTestClient();
     const callback = vi.fn();
 
@@ -86,7 +91,7 @@ describe('Client listeners', () => {
     });
 
     await vi.waitFor(() => {
-      expect(callback).toHaveBeenCalledWith({ messageId: 'ack_1', ack: 2 });
+      expect(callback).toHaveBeenCalledWith(expect.objectContaining({ id: 'ack_1', chatId: '123@c.us', ack: 2 }));
     });
   });
 

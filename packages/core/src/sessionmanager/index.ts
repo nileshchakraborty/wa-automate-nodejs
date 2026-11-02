@@ -1,6 +1,6 @@
 import type { HyperEmitter } from '@open-wa/hyperemitter';
 import type { Logger } from '@open-wa/logger';
-import type { OpenWAEventMap, STATE } from '../events/eventMap.js';
+import type { OpenWAEventMap, STATE } from '../events/eventMap';
 
 export type SessionValidationStage = 'post_injection' | 'post_patch' | 'post_overlay';
 
@@ -243,14 +243,12 @@ export class SessionManager {
             .map(([name]) => name);
         const lowerLevel = this.createLowerLevelTruthSnapshot(lowerLevelTruth);
         const pending = [...requirementPending, ...lowerLevel.pending];
-        const exposureSafe = blockers.length === 0
-            && pending.length === 0
-            && this.runtime.finalization.outcome === 'ready';
-        const ready = this.state === 'READY' && exposureSafe;
+        const ready = this.state === 'READY' && pending.length === 0 && blockers.length === 0;
+        const exposureSafe = ready;
 
         return {
             state: this.state,
-            status: ready ? 'ready' : blockers.length > 0 ? 'blocked' : 'not_ready',
+            status: ready ? 'ready' : 'not_ready',
             ready,
             exposureSafe,
             pending,

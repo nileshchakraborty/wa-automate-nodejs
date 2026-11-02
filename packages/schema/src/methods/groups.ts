@@ -1,3 +1,5 @@
+import { ChatSchema, ContactIdSchema, ContactSchema, GroupChatIdSchema } from '../common-types';
+import { GroupCreationResultSchema } from '../return-types';
 import { z } from 'zod';
 import { defineMethodV2 } from '../registry';
 import { contactIdParam, groupIdParam, withNewMessagesOnlyParam } from '../parameters';
@@ -13,7 +15,7 @@ export const getGroupMembers = defineMethodV2('getGroupMembers', {
     },
     input: z.object({ groupId: groupIdParam }),
     parameterOrder: ['groupId'],
-    output: z.array(z.any()),
+    output: z.array(ContactSchema),
 });
 
 export const getAllGroups = defineMethodV2('getAllGroups', {
@@ -27,7 +29,7 @@ export const getAllGroups = defineMethodV2('getAllGroups', {
     },
     input: z.object({ withNewMessagesOnly: withNewMessagesOnlyParam }),
     parameterOrder: ['withNewMessagesOnly'],
-    output: z.array(z.any()),
+    output: z.array(ChatSchema),
 });
 
 export const getGroupMembersId = defineMethodV2('getGroupMembersId', {
@@ -45,12 +47,18 @@ export const getGroupMembersId = defineMethodV2('getGroupMembersId', {
     },
     input: z.object({ groupId: groupIdParam }),
     parameterOrder: ['groupId'],
-    output: z.array(z.string()),
+    output: z.array(ContactIdSchema),
 });
+
+export const GroupInfoSchema = z.object({
+    title: z.string(),
+    description: z.string().nullish(),
+}).passthrough().describe('Group title and description returned by the private getGroupInfo patch.');
+export type GroupInfo = z.infer<typeof GroupInfoSchema>;
 
 export const getGroupInfo = defineMethodV2('getGroupInfo', {
     meta: {
-        description: 'Get group metadata',
+        description: 'Get the group title and description through the installed private patch',
         action: 'read',
         namespace: 'groups',
         license: 'none',
@@ -59,7 +67,7 @@ export const getGroupInfo = defineMethodV2('getGroupInfo', {
     },
     input: z.object({ groupId: groupIdParam }),
     parameterOrder: ['groupId'],
-    output: z.any(),
+    output: GroupInfoSchema.or(z.string()).nullable(),
 });
 
 export const getGroupAdmins = defineMethodV2('getGroupAdmins', {
@@ -73,7 +81,7 @@ export const getGroupAdmins = defineMethodV2('getGroupAdmins', {
     },
     input: z.object({ groupId: groupIdParam }),
     parameterOrder: ['groupId'],
-    output: z.array(z.any()),
+    output: z.array(ContactIdSchema),
 });
 
 export const getKickedGroups = defineMethodV2('getKickedGroups', {
@@ -87,7 +95,7 @@ export const getKickedGroups = defineMethodV2('getKickedGroups', {
     },
     input: z.object({}),
     parameterOrder: [],
-    output: z.array(z.string()),
+    output: z.array(GroupChatIdSchema),
 });
 
 export const getGroupInviteLink = defineMethodV2('getGroupInviteLink', {
@@ -118,7 +126,7 @@ export const createGroup = defineMethodV2('createGroup', {
         contacts: z.array(contactIdParam).describe('Contact IDs to add'),
     }),
     parameterOrder: ['name', 'contacts'],
-    output: z.any(),
+    output: GroupCreationResultSchema.nullable(),
 });
 
 export const leaveGroup = defineMethodV2('leaveGroup', {
@@ -132,7 +140,7 @@ export const leaveGroup = defineMethodV2('leaveGroup', {
     },
     input: z.object({ groupId: groupIdParam }),
     parameterOrder: ['groupId'],
-    output: z.any(),
+    output: z.void(),
 });
 
 export const joinGroupViaLink = defineMethodV2('joinGroupViaLink', {
@@ -153,7 +161,7 @@ export const joinGroupViaLink = defineMethodV2('joinGroupViaLink', {
         returnChatObj: z.boolean().optional().describe('Return chat object'),
     }),
     parameterOrder: ['link', 'returnChatObj'],
-    output: z.union([z.string(), z.boolean(), z.number(), z.any()]),
+    output: z.union([GroupChatIdSchema, z.boolean(), z.number(), ChatSchema]),
 });
 
 export const revokeGroupInviteLink = defineMethodV2('revokeGroupInviteLink', {

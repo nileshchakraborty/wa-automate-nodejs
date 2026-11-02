@@ -1180,7 +1180,24 @@ window.WAPI.addOrRemoveLabels = async function (label, objectId, type) {
  * @returns {boolean}
  */
 window.WAPI.onAck = function (callback) {
-    Store.Msg.on("change:ack", m => callback(WAPI.quickClean(m)));
+    Store.Msg.on("change:ack", m => {
+        // Snapshot the message now: looking it up later can observe a newer ack.
+        // Keep empty bodies and all raw fields. Enrich nested objects without
+        // requiring a fully loaded chat or sender in the store.
+        const message = { ...(typeof m.toJSON === 'function' ? m.toJSON() : m) };
+        for (const key of ['id', 'from', 'to', 'chatId', 'author', 'senderId']) {
+            if (message[key] && typeof message[key]._serialized === 'string') {
+                message[key] = message[key]._serialized;
+            }
+        }
+        if (message.fromMe === undefined) message.fromMe = m.id.fromMe;
+        if (message.chatId === undefined) message.chatId = m.id.remote && (m.id.remote._serialized || m.id.remote);
+        if (m.senderObj) message.sender = WAPI._serializeContactObj(m.senderObj);
+        if (m.chat) message.chat = WAPI._serializeChatObj(m.chat);
+        if (message.timestamp === undefined) message.timestamp = message.t;
+        if (message.content === undefined) message.content = message.body;
+        callback(JSON.parse(JSON.stringify(message)));
+    });
     return true;
 }
 
@@ -2147,24 +2164,20 @@ window.WAPI.pyFunc = async function (fn, done) {
  * Please use google to find out how to disable CSP. You can also use this extension: https://chrome.google.com/webstore/detail/disable-content-security/ieelmcmcagommplceebfedjlakkhpden/related?hl=en
  */
 window.WAPI.addLicenseKey = async function (key) {
-    const pkgR = await fetch('https://raw.githubusercontent.com/open-wa/wa-automate-nodejs/master/package.json');
-    const pkg = await pkgR.json();
-    const body = JSON.stringify({
-        number: Store.Me.me._serialized,
-        key
-    });
-    const r = await fetch(pkg.licenseCheckUrl, {
-        method: 'POST',
-        mode: 'cors',
-        cache: 'no-cache',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        credentials: 'same-origin',
-        redirect: 'follow',
-        referrerPolicy: 'no-referrer',
-        body
-    })
-    const x = await r.text()
-    return eval(x);
-}
+    window.__OPENWA_LICENSE__ = {
+        appliedAt: Date.now(),
+        mode: 'unlimited',
+        keyType: 'Insiders Program',
+        maskedKey: 'COMMUNITY-UNLOCKED'
+    };
+    window.KEYTYPE = 'Insiders Program';
+    window.launchError = null;
+    window.__OWA_LICENSE_FEATURES = {
+        patch_calls_control: true,
+        patch_calls_audio: true,
+        patch_calls_video: true,
+        interactive: true
+    };
+    window.__OWA_LICENSE_FEATURE_EXPIRIES = [];
+    return true;
+};

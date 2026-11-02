@@ -1,229 +1,83 @@
 ---
-title: Custom code
-description: Use createClient in your Node.js app, choose a driver, and handle startup and shutdown safely.
+title: SDK quick start
+description: Generate a persistent JavaScript or TypeScript WhatsApp bot with open-wa.
 ---
 
-# Custom code
+# SDK quick start
 
-Use this path when your Node.js app needs to own the open-wa runtime instead of calling a separate Easy API process.
+Use the SDK when your application owns the browser and session. Use
+**Node.js 22.21.1 or newer** and npm.
 
-## Install the package and a driver
+## Create the bot
 
-<PackageManagerTabs command="@open-wa/wa-automate @open-wa/driver-puppeteer" />
-
-If your environment has stricter native-install permissions, only fall back to `--unsafe-perm` when you have confirmed you actually need it.
-
-## Runtime entrypoint
-
-<Tabs items={['v5 createClient', 'Legacy create']}>
-<Tab value="v5 createClient">
-
-The v5 public contract centers on `createClient` from `@open-wa/core`, exposed through `@open-wa/wa-automate`. Start new v5 custom code with `createClient` because it matches the current runtime and driver architecture.
-
-```ts
-import { createClient } from '@open-wa/wa-automate';
-import { PuppeteerDriver } from '@open-wa/driver-puppeteer';
-
-async function start() {
-  const client = await createClient({
-    sessionId: 'my-session',
-    driver: new PuppeteerDriver(),
-    headless: true,
-  });
-
-  client.onMessage(async (message) => {
-    if (message.body === 'Hi') {
-      await client.sendText(message.from, '👋 Hello!');
-    }
-  });
-}
-
-start().catch(console.error);
+```bash
+npm init @open-wa@latest my-bot -- --mode sdk
+cd my-bot
+npm start
 ```
 
-On first run, authenticate the session by scanning the QR code or using another supported login flow. When the session is ready, send `Hi` to the connected account and expect the reply above.
+Choose JavaScript or TypeScript, your browser, and any plugins in the wizard.
+You can also use the [project builder](/new?mode=sdk) to preview the generated
+files and copy a command with every choice filled in.
 
-</Tab>
-<Tab value="Legacy create">
+The project includes `index.js` or `index.ts`, the matching `wa.config` file,
+a start script, and ignore rules. TypeScript projects include editor types and
+`tsconfig.json`; Node.js runs these starter files directly.
 
-`create()` is the older compatibility entry point. It still appears in some v4-era examples, but it is not the first pattern to copy for new v5 code.
+If you selected a plugin that needs credentials, copy `.env.example` to `.env`
+and fill it in before running `npm start`.
 
-```ts
+## Connect and handle messages
+
+Scan the terminal QR code using **WhatsApp → Linked devices → Link a device**
+on your phone. Once ready, send `!ping` from another WhatsApp account. The
+starter responds `pong` and keeps running.
+
+The JavaScript entry point looks like this; the TypeScript choice uses the same
+flow and imports `wa.config.ts`:
+
+```js title="index.js"
 import { create } from '@open-wa/wa-automate';
+import config from './wa.config.js';
 
-async function start() {
-  const client = await create({
-    sessionId: 'my-session',
-  });
+const client = await create(config);
+console.log('WhatsApp is ready. Send !ping from another account.');
 
-  client.onMessage(async (message) => {
-    if (message.body === 'Hi') {
-      await client.sendText(message.from, '👋 Hello!');
-    }
-  });
-}
-
-start().catch(console.error);
-```
-
-</Tab>
-</Tabs>
-
-## Choose the driver explicitly
-
-For embedded runtime code, install the driver package you want to run with. The examples above use Puppeteer:
-
-<PackageManagerTabs command="@open-wa/driver-puppeteer" />
-
-Then pass the driver when you create the client:
-
-```ts
-import { createClient } from '@open-wa/wa-automate';
-import { PuppeteerDriver } from '@open-wa/driver-puppeteer';
-
-async function start() {
-  const client = await createClient({
-    sessionId: 'my-session',
-    driver: new PuppeteerDriver(),
-    headless: true,
-  });
-
-  client.onMessage(async (message) => {
-    if (message.body === 'Hi') {
-      await client.sendText(message.from, '👋 Hello!');
-    }
-  });
-}
-
-start().catch(console.error);
-```
-
-## TypeScript setup
-
-Custom code projects work best with a normal Node.js TypeScript setup. Use a recent Node target, keep module resolution compatible with your runtime, and await async client methods instead of treating them like sync helpers.
-
-## What runtime creation does
-
-`createClient()` launches the automation runtime, restores or authenticates the session, and returns the client surface you use for listeners and actions.
-
-It is the boundary where configuration, browser launch, authentication state, and runtime listeners all meet.
-
-## Build a real launch config
-
-```ts
-const client = await createClient({
-  sessionId: 'sales',
-  driver: new PuppeteerDriver(),
-  headless: true,
-  qrTimeout: 0,
-  authTimeout: 60,
+client.onMessage(async message => {
+  if (!message.fromMe && message.body === '!ping') {
+    await client.sendText(message.from, 'pong');
+  }
 });
-```
 
-Use an explicit driver and browser configuration when browser-specific behavior matters for your flow.
-
-## Auth behavior
-
-On first run, the runtime needs to authenticate the WhatsApp session. Depending on your config and environment, that usually means scanning a QR code or using another supported login flow.
-
-After the first successful login, the session data is saved for the configured `sessionId`. Later runs with the same session can restore that state instead of asking you to log in again, as long as the saved auth data is still valid and available to the process.
-
-## First send/receive
-
-This example sends a startup message to a known chat and replies when that chat sends `Hi`:
-
-```ts
-import { createClient } from '@open-wa/wa-automate';
-import { PuppeteerDriver } from '@open-wa/driver-puppeteer';
-
-async function start() {
-  const client = await createClient({
-    sessionId: 'sales',
-    driver: new PuppeteerDriver(),
-    headless: true,
-  });
-
-  const chatId = '15551234567@c.us';
-
-  await client.sendText(chatId, 'Bot is online. Send Hi to test the reply flow.');
-
-  client.onMessage(async (message) => {
-    if (message.from === chatId && message.body === 'Hi') {
-      await client.sendText(message.from, '👋 Hello from custom code.');
-    }
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => {
+    void client.stop(signal).catch(console.error);
   });
 }
-
-start().catch(console.error);
 ```
 
-Replace `15551234567@c.us` with the chat id you want to test against.
+The handler reuses `message.from`, including `@lid` identities. It sends only
+when someone types `!ping`; startup itself doesn't send a greeting. Add your
+own handlers here. See [`create()`](/docs/reference/create),
+[client methods](/docs/reference/client/client), and the
+[chat ID guide](/docs/guides/chatid-primer).
 
-## Cleanup/shutdown
+## Configure browsers and plugins
 
-If your process handles shutdown signals, close the client before exiting so the browser and runtime resources are cleaned up:
+Edit `wa.config.js` or `wa.config.ts`. The entry point passes it to `create()`;
+it isn't implicitly loaded by the SDK. The generated config also loads `.env`
+when present. Browser selections and plugins use the same setup options as
+Easy API. They download only when needed and are cached.
 
-```ts
-import { createClient } from '@open-wa/wa-automate';
-import { PuppeteerDriver } from '@open-wa/driver-puppeteer';
+SDK mode doesn't start an HTTP server or Neo dashboard. Use
+[Easy API](/docs/getting-started/easy-api) if you want those surfaces. Chatwoot
+requires Easy API webhook routes, so the initializer excludes it from SDK mode.
+Voxtral can run in the SDK using its file settings; see the
+[Voxtral guide](/docs/guides/voxtral).
 
-async function start() {
-  const client = await createClient({
-    sessionId: 'sales',
-    driver: new PuppeteerDriver(),
-  });
+## Stop and restart
 
-  const shutdown = async () => {
-    await client.stop();
-    process.exit(0);
-  };
-
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
-}
-
-start().catch(console.error);
-```
-
-## v5 caveat
-
-<Callout type="tip" title="Default to createClient">
-  v5 is the forward path, but some examples still show the older `create()` shape for compatibility. Treat `createClient` as the default for new v5 custom code unless a page says otherwise.
-</Callout>
-
-## Plugin vs custom code
-
-Use plugins when you are building reusable integrations that should be loaded through config, shared across projects, or published as separate packages.
-
-Use custom code when the logic belongs to one app, such as routing incoming messages into your own database, queue, CRM, or business workflow.
-
-## SocketClient vs embedded runtime
-
-`SocketClient` connects your Node.js app to a running Easy API instance. The Easy API process owns the browser, session lifecycle, and HTTP surface while your app consumes commands and events remotely.
-
-Embedded runtime code owns the browser directly inside your process through `createClient`. Use it when you need direct control over driver selection, launch config, shutdown, and session behavior.
-
-## Browser/runtime notes
-
-- If you are using your own Chrome install, make that explicit instead of depending on auto-discovery.
-- On Linux hosts, validate browser dependencies before debugging application logic.
-- Keep the browser/runtime assumptions the same between local development and production where possible.
-
-## Recommended next steps
-
-- Move session-specific settings into a real config object.
-- Read **[Configuration and CLI](/docs/guides/configuration-and-cli)** for the core options.
-- Read **[Session events](/docs/guides/session-events)** if you need QR or lifecycle hooks.
-- Read **[Best practices](/docs/operations-and-troubleshooting/best-practices)** before production rollout.
-
-## Runtime notes
-
-- Prefer explicit Chrome configuration when you rely on browser-specific behavior.
-- Keep one primary client per process unless you have a clear multi-session orchestration plan.
-- Treat all client methods as async operations and await them consistently.
-
-## Common next moves
-
-- Add `ev` listeners when you need raw lifecycle hooks.
-- Externalize heavy work to queues or workers instead of doing everything inside one `onMessage` callback.
-- Read **[Error handling](/docs/operations-and-troubleshooting/error-handling)** and **[Best practices](/docs/operations-and-troubleshooting/best-practices)** before shipping a long-running bot.
+Press `Ctrl+C` to stop the client and browser. Run `npm start` again from the
+same directory to reuse a valid saved session. Keep `.env` and session data
+private. If a send fails with an uncertain result, inspect the receiving chat
+before retrying it.

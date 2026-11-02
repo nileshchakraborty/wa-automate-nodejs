@@ -56,7 +56,7 @@ describe('Hono Middleware', () => {
       const body = (await res.json()) as Record<string, any>;
       expect(body).toMatchObject({
         status: 'ok',
-        version: '5.0.0',
+        version: '5.10.0',
         host: {
           available: true,
           api: true,
@@ -106,6 +106,43 @@ describe('Hono Middleware', () => {
       await expect(authenticatedQr.json()).resolves.toMatchObject({
         qr: 'sensitive-qr-payload',
       });
+    });
+
+    it('serves the current browser QR and does not reuse a stale cached code', async () => {
+      const config = ConfigSchema.parse({ sessionId: 'test', port: 8013 });
+      const server = new WAServer(config);
+      let currentQr: string | null = 'first-code';
+      let ready = false;
+      server.setQR('stale-code');
+      server.setQrProvider(async () => currentQr);
+      server.setReadinessProvider(() => ({ ready }));
+
+      const readQr = async () => server.getApp().request('/qr');
+      expect(await (await readQr()).json()).toMatchObject({ qr: 'first-code' });
+      currentQr = 'refreshed-code';
+      expect(await (await readQr()).json()).toMatchObject({ qr: 'refreshed-code' });
+      currentQr = null;
+      expect((await readQr()).status).toBe(404);
+      currentQr = 'another-code';
+      ready = true;
+      expect((await readQr()).status).toBe(404);
+    });
+
+    it('requires authentication and explicit confirmation to unlink a session', async () => {
+      const apiKey = 'privacy-first-test-key-32-bytes';
+      const config = ConfigSchema.parse({ sessionId: 'test', host: '0.0.0.0', port: 8014, apiKey });
+      const server = new WAServer(config);
+      const logout = jest.fn(async () => {});
+      server.setReadinessProvider(() => ({ ready: true }));
+      server.setLogoutHandler(logout);
+
+      const request = (headers: Record<string, string>) =>
+        server.getApp().request('/session/logout', { method: 'POST', headers });
+      expect((await request({})).status).toBe(401);
+      expect((await request({ 'X-API-Key': apiKey })).status).toBe(400);
+      expect(logout).not.toHaveBeenCalled();
+      expect((await request({ 'X-API-Key': apiKey, 'X-OpenWA-Confirm': 'unlink' })).status).toBe(202);
+      expect(logout).toHaveBeenCalledOnce();
     });
 
     it('refuses a non-loopback bind without an API key', () => {

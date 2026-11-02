@@ -1,17 +1,19 @@
 {
   "name": "@open-wa/api",
-  "version": "5.0.0-alpha.7",
+  "version": "5.10.0",
   "description": "Reusable Easy API transport and runtime explorer layer for open-wa",
   "main": "./dist/index.cjs",
   "types": "./dist/index.d.cts",
   "exports": {
     ".": {
+      "bun": "./src/index.ts",
       "import": "./dist/index.cjs",
       "require": "./dist/index.cjs",
       "types": "./dist/index.d.cts"
     }
   },
   "files": [
+    "src",
     "dist",
     "dashboard-neo/dist"
   ],
@@ -25,12 +27,12 @@
   "dependencies": {
     "@elastic/elasticsearch": "catalog:",
     "@hono/node-server": "catalog:",
-    "@hono/node-ws": "^1.3.0",
     "@open-wa/mcp": "workspace:*",
     "@open-wa/schema": "workspace:*",
     "@open-wa/screencaster": "workspace:*",
     "hono": "catalog:",
-    "tree-kill": "^1.2.2"
+    "tree-kill": "^1.2.2",
+    "ws": "^8.22.0"
   },
   "peerDependencies": {
     "vite": "*"
@@ -38,14 +40,23 @@
   "devDependencies": {
     "@open-wa/dashboard-neo": "workspace:*",
     "@types/node": "catalog:",
+    "@types/ws": "^8.18.1",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      ".": {
+        "import": "./dist/index.cjs",
+        "require": "./dist/index.cjs",
+        "types": "./dist/index.d.cts"
+      }
+    }
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/open-wa/wa-automate-nodejs.git"
-  }
+  },
+  "license": "SEE LICENSE IN LICENSE.md"
 }
