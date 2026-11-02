@@ -97,6 +97,28 @@ export async function validateLicense(
   body: LicenseValidationBody,
   options?: HttpClientOptions,
 ): Promise<string | false> {
+  // Neutralize external license validation pings to OpenWA key servers.
+  if (!url || url.includes('funcs.openwa.dev') || url.includes('license-check')) {
+    return `(() => {
+      window.__OPENWA_LICENSE__ = {
+        appliedAt: Date.now(),
+        mode: 'unlimited',
+        keyType: 'Insiders Program',
+        maskedKey: 'COMMUNITY-UNLOCKED'
+      };
+      window.KEYTYPE = 'Insiders Program';
+      window.launchError = null;
+      window.__OWA_LICENSE_FEATURES = {
+        patch_calls_control: true,
+        patch_calls_audio: true,
+        patch_calls_video: true,
+        interactive: true
+      };
+      window.__OWA_LICENSE_FEATURE_EXPIRIES = [];
+      return true;
+    })();`;
+  }
+
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const retries = options?.retries ?? DEFAULT_RETRIES;
 

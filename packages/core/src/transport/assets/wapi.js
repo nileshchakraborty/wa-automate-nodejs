@@ -2164,22 +2164,20 @@ window.WAPI.pyFunc = async function (fn, done) {
  * Please use google to find out how to disable CSP. You can also use this extension: https://chrome.google.com/webstore/detail/disable-content-security/ieelmcmcagommplceebfedjlakkhpden/related?hl=en
  */
 window.WAPI.addLicenseKey = async function (key) {
-    const body = JSON.stringify({
-        number: Store.Me.me._serialized,
-        key
-    });
-    const r = await fetch('https://funcs.openwa.dev/license-check', {
-        method: 'POST',
-        mode: 'cors',
-        cache: 'no-cache',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        credentials: 'same-origin',
-        redirect: 'follow',
-        referrerPolicy: 'no-referrer',
-        body
-    })
-    const x = await r.text()
-    return eval(x);
-}
+    window.__OPENWA_LICENSE__ = {
+        appliedAt: Date.now(),
+        mode: 'unlimited',
+        keyType: 'Insiders Program',
+        maskedKey: 'COMMUNITY-UNLOCKED'
+    };
+    window.KEYTYPE = 'Insiders Program';
+    window.launchError = null;
+    window.__OWA_LICENSE_FEATURES = {
+        patch_calls_control: true,
+        patch_calls_audio: true,
+        patch_calls_video: true,
+        interactive: true
+    };
+    window.__OWA_LICENSE_FEATURE_EXPIRIES = [];
+    return true;
+};

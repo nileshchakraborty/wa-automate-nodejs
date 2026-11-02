@@ -954,7 +954,16 @@ export class Transport {
         if (options?.fresh) throw new Error('Fresh public patches could not be downloaded.');
         const fetchMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
         this.logger.warn('remote_patch_fetch_failed', { error: fetchMsg });
-        // Remote fetch failure is non-blocking — we fall through to builtin-only
+        // Fall back to bundled offline patches if remote fetch fails
+        try {
+          const bundled = await this.loadBundledLivePatches();
+          if (bundled.data.length > 0) {
+            remoteFetchResult = { data: bundled.data, tag: bundled.tag, source: 'cached' };
+            this.logger.info('live_patch_loaded_from_bundled', { tag: bundled.tag, patchCount: bundled.data.length });
+          }
+        } catch {
+          // Fall through to builtin-only
+        }
       }
 
       if (remoteFetchResult) {
@@ -2559,7 +2568,7 @@ export class Transport {
     return scriptPromise;
   }
 
-  private static resolveAssetPath(assetFileName: 'launch.js' | 'wapi.js' | 'qr.min.js' | 'hash.js'): string {
+  private static resolveAssetPath(assetFileName: 'launch.js' | 'wapi.js' | 'qr.min.js' | 'hash.js' | 'patches.json'): string {
     const moduleDir = Transport.resolveCurrentModuleDir();
     const candidates = [
       join(moduleDir, 'assets', assetFileName),
@@ -3070,13 +3079,15 @@ export class Transport {
         : GH_LIVE_PATCHES_FALLBACK_URL;
 
     const fetchStart = Date.now();
+    const fetchOptions: { fallbackUrl?: string; fresh?: boolean } = { fallbackUrl };
+    if (fresh) fetchOptions.fresh = true;
     const result = await fetchPatches(
       primaryUrl,
       {
         waVersion: sessionInfo?.WA_VERSION,
         waAutomateVersion: sessionInfo?.WA_AUTOMATE_VERSION,
       },
-      { fallbackUrl, fresh },
+      fetchOptions,
     );
     const fetchDurationMs = Date.now() - fetchStart;
 
@@ -3123,6 +3134,21 @@ export class Transport {
     }
 
     return { data: parsed.data, tag: parsed.tag };
+  }
+
+  private async loadBundledLivePatches(): Promise<{ data: string[]; tag: string }> {
+    try {
+      const assetPath = Transport.resolveAssetPath('patches.json');
+      const raw = await readFile(assetPath, 'utf-8');
+      const data = JSON.parse(raw);
+      if (Array.isArray(data)) {
+        const tag = createHash('md5').update(raw).digest('hex').slice(0, 5);
+        return { data, tag };
+      }
+    } catch (err) {
+      this.logger.debug('bundled_patches_load_failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+    return { data: [], tag: 'bundled' };
   }
 
   private async saveCachedLivePatches(result: { data: string[]; tag: string }): Promise<void> {
