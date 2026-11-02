@@ -1,0 +1,170 @@
+import { useState, useEffect } from "react"
+import { KeyRound, Copy, Check, Sparkles, Download } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@open-wa/ui-components/popover"
+import { getApiKey, getApiUrl, resetClient, setApiKey } from "@/lib/api-client"
+
+export function ApiKeyBadge() {
+  const [key, setKey] = useState(getApiKey())
+  const [inputVal, setInputVal] = useState(getApiKey())
+  const [copied, setCopied] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    const current = getApiKey()
+    setKey(current)
+    setInputVal(current)
+  }, [open])
+
+  const copyKey = async () => {
+    if (!key) return
+    await navigator.clipboard.writeText(key)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleFetchKey = async () => {
+    setLoading(true)
+    setNotice(null)
+    try {
+      const res = await fetch(`${getApiUrl()}/api-key`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = (await res.json()) as { apiKey?: string; key?: string }
+      const fetchedKey = data.apiKey || data.key
+      if (!fetchedKey) throw new Error("No key returned")
+      setApiKey(fetchedKey)
+      setKey(fetchedKey)
+      setInputVal(fetchedKey)
+      setNotice("API key auto-filled from server!")
+      resetClient()
+      window.dispatchEvent(new Event("openwa:reconnect"))
+    } catch {
+      setNotice("Failed to fetch key from server")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleGenerateKey = async () => {
+    setLoading(true)
+    setNotice(null)
+    try {
+      const res = await fetch(`${getApiUrl()}/api-key/generate`, { method: "POST" })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = (await res.json()) as { apiKey?: string; key?: string }
+      const newKey = data.apiKey || data.key
+      if (!newKey) throw new Error("No key generated")
+      setApiKey(newKey)
+      setKey(newKey)
+      setInputVal(newKey)
+      setNotice("New random API key generated & applied!")
+      resetClient()
+      window.dispatchEvent(new Event("openwa:reconnect"))
+    } catch {
+      setNotice("Failed to generate key")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSave = () => {
+    const trimmed = inputVal.trim()
+    setApiKey(trimmed)
+    setKey(trimmed)
+    setNotice(trimmed ? "Key saved & connected!" : "Key cleared!")
+    resetClient()
+    window.dispatchEvent(new Event("openwa:reconnect"))
+    setTimeout(() => setOpen(false), 800)
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="OpenWA API Key Settings"
+          className="flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+        >
+          <KeyRound size={13} className="text-amber-500" />
+          <span className="font-mono">{key ? `${key.slice(0, 6)}…` : "API Key"}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={8} className="w-80 space-y-3 rounded-xl border bg-popover p-4 shadow-lg">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <KeyRound size={15} className="text-amber-500" />
+            <h4 className="text-xs font-semibold text-foreground">OpenWA API Key</h4>
+          </div>
+          {key && (
+            <button
+              type="button"
+              onClick={() => void copyKey()}
+              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+              <span>{copied ? "Copied" : "Copy"}</span>
+            </button>
+          )}
+        </div>
+
+        <p className="text-[11px] text-muted-foreground">
+          Authenticate requests and pair with your OpenWA session.
+        </p>
+
+        <div className="space-y-1.5">
+          <Input
+            type="text"
+            value={inputVal}
+            onChange={(e) => setInputVal(e.target.value)}
+            placeholder="Enter API key or generate"
+            className="h-8 font-mono text-xs"
+          />
+        </div>
+
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void handleFetchKey()}
+            disabled={loading}
+            className="flex-1 text-[11px]"
+          >
+            <Download size={12} className="mr-1" />
+            Auto-fill
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void handleGenerateKey()}
+            disabled={loading}
+            className="flex-1 text-[11px]"
+          >
+            <Sparkles size={12} className="mr-1" />
+            Generate
+          </Button>
+        </div>
+
+        <Button
+          type="button"
+          size="sm"
+          onClick={handleSave}
+          disabled={loading}
+          className="w-full text-xs"
+        >
+          Apply &amp; Reconnect
+        </Button>
+
+        {notice && (
+          <p className="text-center text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+            {notice}
+          </p>
+        )}
+      </PopoverContent>
+    </Popover>
+  )
+}

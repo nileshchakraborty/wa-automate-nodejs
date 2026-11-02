@@ -1,9 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { useSession } from "@/lib/hooks/use-session"
 import { useSocket } from "@/lib/hooks/use-socket"
 import { useEvents, type EventLog } from "@/lib/hooks/use-events"
 import { useHealth } from "@/lib/hooks/use-health"
-import { getClient } from "@/lib/api-client"
+import { getClient, getApiKey, getApiUrl, setApiKey, resetClient } from "@/lib/api-client"
 import { useDemo } from "@/lib/demo/use-demo"
 import { usePrivacy } from "@/lib/hooks/use-privacy"
 import { getLaunchPhase } from "@/lib/launch-phase"
@@ -34,6 +34,9 @@ import {
   ScanLine,
   Loader2,
   Hash,
+  KeyRound,
+  Sparkles,
+  Download,
   type LucideIcon,
 } from "lucide-react"
 import { useMemo, useState, useEffect, useRef } from "react"
@@ -118,6 +121,66 @@ function PreLaunchView({
     "launching"
   )
   const demoTimeoutIds = useRef<ReturnType<typeof setTimeout>[]>([])
+
+  const [apiKeyVal, setApiKeyVal] = useState(getApiKey())
+  const [keyNotice, setKeyNotice] = useState<string | null>(null)
+  const [keyBusy, setKeyBusy] = useState(false)
+
+  const handleFetchKey = async () => {
+    setKeyBusy(true)
+    try {
+      const res = await fetch(`${getApiUrl()}/api-key`)
+      if (res.ok) {
+        const data = (await res.json()) as { apiKey?: string; key?: string }
+        const key = data.apiKey || data.key
+        if (key) {
+          setApiKey(key)
+          setApiKeyVal(key)
+          setKeyNotice("Key retrieved from server!")
+          resetClient()
+          window.dispatchEvent(new Event("openwa:reconnect"))
+          return
+        }
+      }
+      setKeyNotice("Could not auto-fetch key")
+    } catch {
+      setKeyNotice("Could not reach server")
+    } finally {
+      setKeyBusy(false)
+    }
+  }
+
+  const handleGenerateKey = async () => {
+    setKeyBusy(true)
+    try {
+      const res = await fetch(`${getApiUrl()}/api-key/generate`, { method: "POST" })
+      if (res.ok) {
+        const data = (await res.json()) as { apiKey?: string; key?: string }
+        const key = data.apiKey || data.key
+        if (key) {
+          setApiKey(key)
+          setApiKeyVal(key)
+          setKeyNotice("New random key generated & connected!")
+          resetClient()
+          window.dispatchEvent(new Event("openwa:reconnect"))
+          return
+        }
+      }
+      setKeyNotice("Key generation failed")
+    } catch {
+      setKeyNotice("Could not reach server")
+    } finally {
+      setKeyBusy(false)
+    }
+  }
+
+  const handleSaveKey = () => {
+    const trimmed = apiKeyVal.trim()
+    setApiKey(trimmed)
+    setKeyNotice(trimmed ? "Key saved & reconnecting…" : "Key cleared")
+    resetClient()
+    window.dispatchEvent(new Event("openwa:reconnect"))
+  }
 
   if (qr) phase = "qr"
   // In demo mode, drip-feed log lines to simulate a real launch
@@ -247,15 +310,75 @@ function PreLaunchView({
         </p>
       </div>
 
-      {connectionFailed && (
-        <div
-          role="alert"
-          className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
-        >
-          Open <strong>Connect</strong> in the header to sign in, register a
-          private WhatsApp session, or use an existing API key.
+      <div className="rounded-xl border bg-card p-4 shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <KeyRound size={16} className="text-amber-500" />
+            <h3 className="text-sm font-semibold">OpenWA API Key</h3>
+          </div>
+          <Link
+            to="/pairing"
+            className="text-xs text-primary font-medium hover:underline flex items-center gap-1"
+          >
+            Pairing settings →
+          </Link>
         </div>
-      )}
+
+        <p className="text-xs text-muted-foreground">
+          {connectionFailed
+            ? "Authentication required. Generate or auto-fetch a key to pair with your WhatsApp session."
+            : "Active API key used to communicate with this OpenWA instance."}
+        </p>
+
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="text"
+            value={apiKeyVal}
+            onChange={(e) => setApiKeyVal(e.target.value)}
+            placeholder="Enter or auto-generate API key"
+            className="flex-1 rounded-md border bg-background px-3 py-1.5 font-mono text-xs"
+          />
+          <div className="flex gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleFetchKey()}
+              disabled={keyBusy}
+              className="text-xs"
+            >
+              <Download size={13} className="mr-1" />
+              Auto-fill
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleGenerateKey()}
+              disabled={keyBusy}
+              className="text-xs"
+            >
+              <Sparkles size={13} className="mr-1" />
+              Generate
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleSaveKey}
+              disabled={keyBusy || !apiKeyVal.trim()}
+              className="text-xs"
+            >
+              Connect
+            </Button>
+          </div>
+        </div>
+
+        {keyNotice && (
+          <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+            {keyNotice}
+          </p>
+        )}
+      </div>
 
       {/* Progress bar */}
       {effectivePhase !== "ready" && (

@@ -20,6 +20,8 @@ import {
   Search,
   X,
   QrCode,
+  KeyRound,
+  Boxes,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -120,7 +122,7 @@ export function AppSidebar({
       label: "Session",
       items: [
         { title: "Overview", href: "/", icon: <Zap size={20} /> },
-        { title: "Pairing", href: "/pairing", icon: <QrCode size={20} /> },
+        { title: "Pairing & API Key", href: "/pairing", icon: <KeyRound size={20} /> },
         { title: "Health", href: "/health", icon: <HeartPulse size={20} /> },
         { title: "Live events", href: "/events", icon: <Activity size={20} /> },
       ],
@@ -139,6 +141,8 @@ export function AppSidebar({
       items: [
         { title: "Message studio", href: "/studio/messages", icon: <MessageSquare size={20} /> },
         { title: "Sticker studio", href: "/studio/stickers", icon: <Sticker size={20} /> },
+        { title: "Integrations", href: "/integrations", icon: <Plug size={20} /> },
+        { title: "Applications", href: "/apps", icon: <Boxes size={20} /> },
         {
           title: "API reference",
           href: "/api-docs",
@@ -296,7 +300,22 @@ export function AppSidebar({
           </p>
         )}
       </nav>
-      <footer className="flex shrink-0 flex-col gap-3 border-t border-separator-border px-1 pt-3">
+      <footer className="flex shrink-0 flex-col gap-2.5 border-t border-separator-border px-1 pt-3">
+        {!rail && (
+          <Link
+            to="/pairing"
+            search={search}
+            className="flex items-center justify-between rounded-lg border border-border-button-white bg-background-tertiary px-2.5 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-background-secondary-hover"
+          >
+            <span className="flex items-center gap-1.5 font-medium">
+              <KeyRound size={13} className="text-amber-500" />
+              API Key:
+            </span>
+            <span className="font-mono text-[11px] text-accent-500">
+              {getApiKey() ? `${getApiKey().slice(0, 6)}…` : "Set key"}
+            </span>
+          </Link>
+        )}
         {!rail && <SessionStatusBadge />}
         <PrivacyToggle collapsed={rail} />
         <ThemeToggle collapsed={rail} />

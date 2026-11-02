@@ -9,6 +9,7 @@ import { useState } from "react"
 import { Menu, SlidersHorizontal } from "lucide-react"
 import { AppSidebar } from "@/components/app-sidebar"
 import { ConnectionBadge } from "@/components/connection-badge"
+import { ApiKeyBadge } from "@/components/api-key-badge"
 import { SessionLicenseBadge } from "@/components/session-license-badge"
 import { ReportIssueDialog } from "@/components/report-issue-dialog"
 import { ThemeProvider } from "@/components/theme-provider"
@@ -44,6 +45,7 @@ function MessageToastListener() {
 
 const PAGE_TITLES: Record<string, string> = {
   "/": "Overview",
+  "/pairing": "Pairing & API Key",
   "/health": "Health",
   "/events": "Live events",
   "/contacts": "Contacts",
@@ -124,10 +126,9 @@ function Workspace() {
               </Chip>
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
-            <div className="hidden lg:block">
-              <ConnectionBadge />
-            </div>
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            <ApiKeyBadge />
+            <ConnectionBadge />
             <SessionLicenseBadge />
             <ReportIssueDialog />
             <Popover>
