@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useCallback, useEffect, useState } from "react"
 import { toDataURL } from "qrcode"
+import { Copy, Check } from "lucide-react"
 import { apiFetch, getApiKey, getApiUrl, setApiKey } from "@/lib/api-client"
 
 export const Route = createFileRoute("/pairing")({ component: PairingPage })
@@ -223,9 +224,24 @@ function PairingPage() {
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>API Key</span>
             {activeKey ? (
-              <span className="font-mono text-[11px] text-foreground">
-                {activeKey.slice(0, 8)}...{activeKey.slice(-6)}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[11px] text-foreground">
+                  {activeKey.slice(0, 8)}...{activeKey.slice(-6)}
+                </span>
+                <button
+                  type="button"
+                  title={copiedKey ? "Copied!" : "Copy API key"}
+                  aria-label="Copy API key"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(activeKey)
+                    setCopiedKey(true)
+                    setTimeout(() => setCopiedKey(false), 2000)
+                  }}
+                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                >
+                  {copiedKey ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                </button>
+              </div>
             ) : (
               <span className="italic text-muted-foreground">Not set</span>
             )}
@@ -235,23 +251,10 @@ function PairingPage() {
               type="button"
               onClick={() => void handleGenerateKey()}
               disabled={generatingKey}
-              className="flex-1 rounded-md border bg-muted/60 px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+              className="w-full rounded-md border bg-muted/60 px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
             >
               {generatingKey ? "Generating…" : "Generate New Key"}
             </button>
-            {activeKey && (
-              <button
-                type="button"
-                onClick={() => {
-                  void navigator.clipboard.writeText(activeKey)
-                  setCopiedKey(true)
-                  setTimeout(() => setCopiedKey(false), 2000)
-                }}
-                className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
-              >
-                {copiedKey ? "Copied" : "Copy key"}
-              </button>
-            )}
           </div>
           {keyNotice && (
             <p className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 font-medium">{keyNotice}</p>

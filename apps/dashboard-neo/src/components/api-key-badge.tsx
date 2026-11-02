@@ -101,11 +101,12 @@ export function ApiKeyBadge() {
           {key && (
             <button
               type="button"
+              title={copied ? "Copied!" : "Copy key"}
+              aria-label="Copy API key"
               onClick={() => void copyKey()}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             >
-              {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
-              <span>{copied ? "Copied" : "Copy"}</span>
+              {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
             </button>
           )}
         </div>

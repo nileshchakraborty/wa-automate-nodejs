@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { Copy, Check } from "lucide-react"
 import type { ConnectionProfile } from "@/lib/connection-profiles"
 import { useSocket } from "@/lib/hooks/use-socket"
 import { getApiKey, getApiUrl, resetClient, setApiKey } from "@/lib/api-client"
@@ -399,13 +400,15 @@ export function ConnectionBadge() {
               <code className="mt-2 block break-all rounded bg-background p-2 text-[11px]">
                 {issuedKey}
               </code>
-              <div className="mt-2 flex gap-2">
+              <div className="mt-2 flex items-center gap-2">
                 <button
                   type="button"
+                  title={copied ? "Copied!" : "Copy key"}
+                  aria-label="Copy API key"
                   onClick={copyIssuedKey}
-                  className="flex-1 rounded-md border px-3 py-1.5 text-xs font-medium"
+                  className="rounded-md border p-1.5 text-xs font-medium hover:bg-muted"
                 >
-                  {copied ? "Copied" : "Copy key"}
+                  {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                 </button>
                 <button
                   type="button"
