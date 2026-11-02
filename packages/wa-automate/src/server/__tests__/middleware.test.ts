@@ -108,37 +108,22 @@ describe('Hono Middleware', () => {
       });
     });
 
-    it('serves the configured or generated api key via /api-key publicly', async () => {
+    it('does not expose or rotate the configured API key through public routes', async () => {
       const apiKey = 'test-secret-key-12345';
       const config = ConfigSchema.parse({ sessionId: 'test', host: '0.0.0.0', port: 8015, apiKey });
       const server = new WAServer(config);
-      const res = await server.getApp().request('/api-key');
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body).toMatchObject({ apiKey, key: apiKey, status: 'ok' });
-
-      // Plain text support
-      const textRes = await server.getApp().request('/api-key?format=text');
-      expect(textRes.status).toBe(200);
-      expect(await textRes.text()).toBe(apiKey);
-    });
-
-    it('generates and returns a random api key if none was configured', async () => {
-      const config = ConfigSchema.parse({ sessionId: 'test', host: '127.0.0.1', port: 8016 });
-      const server = new WAServer(config);
-      const res = await server.getApp().request('/api-key');
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { apiKey: string; key: string; status: string };
-      expect(typeof body.apiKey).toBe('string');
-      expect(body.apiKey.length).toBeGreaterThan(16);
-      expect(body.status).toBe('ok');
-
-      // Test generating a new key
-      const postGenRes = await server.getApp().request('/api-key/generate', { method: 'POST' });
-      expect(postGenRes.status).toBe(200);
-      const postGenBody = (await postGenRes.json()) as { apiKey: string; key: string; status: string; generated: boolean };
-      expect(postGenBody.generated).toBe(true);
-      expect(postGenBody.apiKey).not.toBe(body.apiKey);
+      for (const path of ['/api-key', '/api-key/generate', '/auth/api-key', '/api/key', '/api/key/generate']) {
+        const response = await server.getApp().request(path);
+        expect(response.status).toBe(401);
+        expect(await response.text()).not.toContain(apiKey);
+        const generated = await server.getApp().request(path, { method: 'POST' });
+        expect(generated.status).toBe(401);
+        expect(await generated.text()).not.toContain(apiKey);
+      }
+      const authenticated = await server.getApp().request('/api-key', {
+        headers: { 'X-API-Key': apiKey },
+      });
+      expect(authenticated.status).toBe(404);
     });
 
     it('serves the current browser QR and does not reuse a stale cached code', async () => {
