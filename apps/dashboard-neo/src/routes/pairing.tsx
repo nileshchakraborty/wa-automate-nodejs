@@ -22,7 +22,23 @@ function PairingPage() {
   const refresh = useCallback(async () => {
     try {
       const base = getApiUrl()
-      const healthResponse = await apiFetch(`${base}/health`, { signal: AbortSignal.timeout(5000) })
+      let healthResponse = await apiFetch(`${base}/health`, { signal: AbortSignal.timeout(5000) })
+      if (healthResponse.status === 401) {
+        // Attempt to auto-retrieve key from /api-key if available on same host
+        try {
+          const keyRes = await fetch(`${base}/api-key`, { signal: AbortSignal.timeout(2000) })
+          if (keyRes.ok) {
+            const data = (await keyRes.json()) as { apiKey?: string; key?: string }
+            const foundKey = data.apiKey || data.key
+            if (foundKey) {
+              setApiKey(foundKey)
+              healthResponse = await apiFetch(`${base}/health`, { signal: AbortSignal.timeout(5000) })
+            }
+          }
+        } catch {
+          // Fall through to manual key entry
+        }
+      }
       if (healthResponse.status === 401) throw new Error("API key required")
       if (!healthResponse.ok) throw new Error(`OpenWA returned HTTP ${healthResponse.status}`)
       const health = await healthResponse.json() as {
@@ -96,15 +112,40 @@ function PairingPage() {
             }}
           >
             <label htmlFor="pairing-api-key" className="block text-sm font-medium">OpenWA API key</label>
-            <input
-              id="pairing-api-key"
-              type="password"
-              autoComplete="off"
-              value={apiKeyInput}
-              onChange={(event) => setApiKeyInput(event.target.value)}
-              className="w-full rounded-md border bg-background px-3 py-2"
-            />
-            <button type="submit" disabled={!apiKeyInput.trim()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
+            <div className="flex gap-2">
+              <input
+                id="pairing-api-key"
+                type="password"
+                autoComplete="off"
+                placeholder="Enter or auto-fetch API key"
+                value={apiKeyInput}
+                onChange={(event) => setApiKeyInput(event.target.value)}
+                className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const res = await fetch(`${getApiUrl()}/api-key`)
+                    if (res.ok) {
+                      const data = (await res.json()) as { apiKey?: string; key?: string }
+                      const key = data.apiKey || data.key
+                      if (key) {
+                        setApiKeyInput(key)
+                        setApiKey(key)
+                        void refresh()
+                      }
+                    }
+                  } catch {
+                    setError("Could not auto-fetch API key from server")
+                  }
+                }}
+                className="rounded-md border bg-muted px-3 py-2 text-xs font-medium hover:bg-muted/80"
+              >
+                Auto-fill
+              </button>
+            </div>
+            <button type="submit" disabled={!apiKeyInput.trim()} className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
               Connect
             </button>
           </form>

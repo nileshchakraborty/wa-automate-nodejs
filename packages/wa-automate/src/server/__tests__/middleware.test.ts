@@ -108,6 +108,32 @@ describe('Hono Middleware', () => {
       });
     });
 
+    it('serves the configured or generated api key via /api-key publicly', async () => {
+      const apiKey = 'test-secret-key-12345';
+      const config = ConfigSchema.parse({ sessionId: 'test', host: '0.0.0.0', port: 8015, apiKey });
+      const server = new WAServer(config);
+      const res = await server.getApp().request('/api-key');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toMatchObject({ apiKey, key: apiKey, status: 'ok' });
+
+      // Plain text support
+      const textRes = await server.getApp().request('/api-key?format=text');
+      expect(textRes.status).toBe(200);
+      expect(await textRes.text()).toBe(apiKey);
+    });
+
+    it('generates and returns a random api key if none was configured', async () => {
+      const config = ConfigSchema.parse({ sessionId: 'test', host: '127.0.0.1', port: 8016 });
+      const server = new WAServer(config);
+      const res = await server.getApp().request('/api-key');
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { apiKey: string; key: string; status: string };
+      expect(typeof body.apiKey).toBe('string');
+      expect(body.apiKey.length).toBeGreaterThan(16);
+      expect(body.status).toBe('ok');
+    });
+
     it('serves the current browser QR and does not reuse a stale cached code', async () => {
       const config = ConfigSchema.parse({ sessionId: 'test', port: 8013 });
       const server = new WAServer(config);

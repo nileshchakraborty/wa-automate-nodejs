@@ -4,6 +4,7 @@ import { logger } from 'hono/logger';
 import { createAdaptorServer, upgradeWebSocket } from '@hono/node-server';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { createServer, type Server } from 'node:http';
+import { randomBytes } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { getHttpMethodDefinitions, type Config } from '@open-wa/schema';
 import '@open-wa/schema';
@@ -61,7 +62,10 @@ function isPublicRoute(method: string, path: string): boolean {
   return method === 'OPTIONS'
     || path === '/health/live'
     || path === '/dashboard'
-    || path.startsWith('/dashboard/');
+    || path.startsWith('/dashboard/')
+    || path === '/api-key'
+    || path === '/auth/api-key'
+    || path === '/api/key';
 }
 
 export class ApiServer {
@@ -420,6 +424,24 @@ export class ApiServer {
     // The host router can already be serving health/dashboard requests while
     // plugins initialize. Swap the delegate instead of mutating its matcher.
     this.app.all('/plugins/*', (c) => this.pluginApp.fetch(c.req.raw, c.env));
+
+    const handleApiKeyRequest = (c: any) => {
+      if (!this.config.apiKey) {
+        this.config.apiKey = randomBytes(24).toString('base64url');
+      }
+      if (c.req.query('format') === 'text' || c.req.header('Accept') === 'text/plain') {
+        return c.text(this.config.apiKey);
+      }
+      return c.json({
+        apiKey: this.config.apiKey,
+        key: this.config.apiKey,
+        status: 'ok',
+      });
+    };
+
+    this.app.get('/api-key', handleApiKeyRequest);
+    this.app.get('/auth/api-key', handleApiKeyRequest);
+    this.app.get('/api/key', handleApiKeyRequest);
 
     this.app.get('/health/live', (c) => c.json({ status: 'ok' }));
 

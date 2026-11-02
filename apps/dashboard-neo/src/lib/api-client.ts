@@ -64,11 +64,22 @@ export async function getClient(url?: string) {
 }
 
 export function getApiKey(): string {
-  return _apiKey
+  if (_apiKey) return _apiKey
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("owa_api_key") || ""
+  }
+  return ""
 }
 
 export function setApiKey(apiKey: string): void {
   _apiKey = apiKey
+  if (typeof window !== "undefined") {
+    if (apiKey) {
+      localStorage.setItem("owa_api_key", apiKey)
+    } else {
+      localStorage.removeItem("owa_api_key")
+    }
+  }
 }
 
 export function apiFetch(input: RequestInfo | URL, init: RequestInit = {}) {
